@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix OrderBook Visualizer",
+  "description": "A live infographic engine that translates complex trading data into clear, actionable market sentiment visualizations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
