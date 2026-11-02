@@ -9,6 +9,8 @@ export type AlertType =
   | 'UNIFIED_CONFLUENCE_SIGNAL'
   | 'BUY_SETUP'
   | 'SELL_SETUP'
+  | 'CONFIRMED_REVERSAL'
+  | 'LIQUIDITY_BYPASS_WARNING'
   | 'ORDER_STACKING_BUILDUP'
   | 'LIQUIDATION_SQUEEZE'
   | 'IMPULSE_IGNITION'
@@ -67,6 +69,12 @@ export function buildStructuredAlert(
     refusedPrice?: number;
     refusalReason?: string;
     rejectionSide?: 'BUYERS' | 'SELLERS';
+    reversalSide?: 'BULLISH' | 'BEARISH';
+    reversalLevelName?: string;
+    defendedPrice?: number;
+    targetPrice?: number;
+    exhaustionPct?: number;
+    reversalReason?: string;
     dominantSide?: 'BUY' | 'SELL';
     totalLotStack?: number;
     blockCount?: number;
@@ -79,9 +87,6 @@ export function buildStructuredAlert(
   const now = Date.now();
   const timeFormatted = new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const digits = getInstrumentPrecision(symbol);
-  const pStr = formatPriceExact(price, symbol);
-  const spokenPStr = formatPriceForAudio(price, symbol);
-
   const edge = modelOutput.sniperEdge;
   const val = modelOutput.valueStructure.val.toFixed(digits);
   const vah = modelOutput.valueStructure.vah.toFixed(digits);
@@ -89,6 +94,17 @@ export function buildStructuredAlert(
   const cvdTrend = mi?.orderFlow.cvdTrend || 'BULLISH';
   const deltaVal = mi?.orderFlow.delta ?? (modelOutput.orderFlow.deltaTrend === 'POSITIVE' ? '+420' : '-380');
   const deltaStr = typeof deltaVal === 'number' ? (deltaVal > 0 ? `+${deltaVal}` : `${deltaVal}`) : deltaVal;
+
+  const pStr = formatPriceExact(price, symbol);
+  const spokenPStr = formatPriceForAudio(price, symbol);
+  const spokenEntry = formatPriceForAudio(edge.optimalEntry, symbol);
+  const spokenSL = formatPriceForAudio(edge.hardStopLoss, symbol);
+  const spokenTP1 = formatPriceForAudio(edge.targetTP1, symbol);
+  const spokenTP2 = formatPriceForAudio(edge.targetTP2, symbol);
+  const spokenTP3 = formatPriceForAudio(edge.targetTP3, symbol);
+  const spokenPOC = formatPriceForAudio(modelOutput.valueStructure.poc, symbol);
+  const spokenVAH = formatPriceForAudio(modelOutput.valueStructure.vah, symbol);
+  const spokenVAL = formatPriceForAudio(modelOutput.valueStructure.val, symbol);
 
   let priority: AlertPriority = 'MEDIUM';
   let headline = '';
@@ -110,7 +126,7 @@ export function buildStructuredAlert(
 
       headline = `🎯 5-PILLAR UNIFIED CONFLUENCE ${side} SIGNAL — ${fullName}`;
       summary = `All 5 order flow engines synchronized: Contract Stacking (${lots} lots), ${trappedPct}% Liquidation Squeeze, Velocity Ignition (+${vel}p), Climactic Exhaustion (${climZ}x vol), and ${compPct}% Compression Coil into one unified institutional ${side} signal.`;
-      customSpokenText = `Master unified confluence ${side.toLowerCase()} signal confirmed on ${fullName} at ${pStr}! All five order flow disciplines are synchronized into a single high-conviction setup. Contract stacking has accumulated ${lots} lots, sixty-two percent of retail counter-traders are trapped in a liquidation squeeze, vertical velocity ignition is breaking through thin liquidity, climactic volume has exhausted counter-pressure, and volatility compression is releasing directionally toward Take Profit 1 at ${edge.targetTP1.toFixed(digits)}. Optimal entry is ${edge.optimalEntry.toFixed(digits)} with hard stop loss protected at ${edge.hardStopLoss.toFixed(digits)}.`;
+      customSpokenText = `Master unified confluence ${side.toLowerCase()} signal confirmed on ${fullName} at ${spokenPStr}! All five order flow disciplines are synchronized into a single high-conviction setup. Contract stacking has accumulated ${lots} lots, sixty-two percent of retail counter-traders are trapped in a liquidation squeeze, vertical velocity ignition is breaking through thin liquidity, climactic volume has exhausted counter-pressure, and volatility compression is releasing directionally toward Take Profit 1 at ${spokenTP1}. Optimal entry is ${spokenEntry} with hard stop loss protected at ${spokenSL}.`;
       tags.push('UNIFIED_CONFLUENCE', `${side}_SIGNAL`, '5_PILLARS_SYNC', 'MASTER_EDGE');
       formattedText = `## 🎯 5-PILLAR UNIFIED CONFLUENCE ${side} SIGNAL — ALL ENGINES COMBINED
 
@@ -142,7 +158,7 @@ export function buildStructuredAlert(
       const sweptLots = audit?.sweptLiquidityVolumeLots || 420;
       headline = `🟢 INSTANT BUY SIGNAL (POST-SWEEP CONFIRMED) — ${fullName}`;
       summary = `All attracting downside liquidity swept at ${sweptPrice} (${sweptLots} lots). Manipulation reclaimed; instant Buy locked at ${edge.optimalEntry.toFixed(digits)} targeting ${edge.targetTP1.toFixed(digits)}.`;
-      customSpokenText = `Instant accurate Buy signal locked on ${fullName} at ${pStr}. Pre-signal liquidity audit complete: all attracting downside sell-stop liquidity at ${sweptPrice} has been taken out, and the stop-hunt manipulation wick below Value Area Low ${val} was absorbed and reclaimed. Zero remaining downside magnet. Aggressive sellers are ${modelOutput.exhaustion.exhaustionScore} percent exhausted with ${modelOutput.exhaustion.powerRemaining} percent power remaining. Order flow delta is ${deltaStr}. Optimal entry is ${edge.optimalEntry.toFixed(digits)}, hard stop loss invalidation protected behind the cleared sweep void at ${edge.hardStopLoss.toFixed(digits)}, targeting Take Profit 1 at ${edge.targetTP1.toFixed(digits)} and Take Profit 2 at ${edge.targetTP2.toFixed(digits)}.`;
+      customSpokenText = `Instant accurate Buy signal locked on ${fullName} at ${spokenPStr}. Pre-signal liquidity audit complete: all attracting downside sell-stop liquidity at ${formatPriceForAudio(Number(sweptPrice), symbol)} has been taken out, and the stop-hunt manipulation wick below Value Area Low ${spokenVAL} was absorbed and reclaimed. Zero remaining downside magnet. Aggressive sellers are ${modelOutput.exhaustion.exhaustionScore} percent exhausted with ${modelOutput.exhaustion.powerRemaining} percent power remaining. Order flow delta is ${deltaStr}. Optimal entry is ${spokenEntry}, hard stop loss invalidation protected behind the cleared sweep void at ${spokenSL}, targeting Take Profit 1 at ${spokenTP1} and Take Profit 2 at ${spokenTP2}.`;
       tags.push('BUY', 'POST_SWEEP_LOCKED', 'MANIPULATION_CLEARED', 'LONG');
       formattedText = `## 🟢 INSTANT BUY SIGNAL — POST-SWEEP & MANIPULATION CLEARED
  
@@ -197,7 +213,7 @@ Watching for trapped short liquidation to accelerate price through the Low Volum
       const sweptLots = audit?.sweptLiquidityVolumeLots || 410;
       headline = `🔴 INSTANT SELL SIGNAL (POST-SWEEP CONFIRMED) — ${fullName}`;
       summary = `All attracting overhead liquidity swept at ${sweptPrice} (${sweptLots} lots). Manipulation reclaimed; instant Sell locked at ${edge.optimalEntry.toFixed(digits)} targeting ${edge.targetTP1.toFixed(digits)}.`;
-      customSpokenText = `Instant accurate Sell signal locked on ${fullName} at ${pStr}. Pre-signal liquidity audit complete: all attracting overhead buy-stop liquidity at ${sweptPrice} has been taken out, and the Judas swing manipulation spike above Value Area High ${vah} was absorbed and rejected. Zero remaining overhead magnet. Aggressive buyers are ${modelOutput.exhaustion.exhaustionScore} percent exhausted with ${modelOutput.exhaustion.powerRemaining} percent power remaining. Order flow delta is ${deltaStr}. Optimal entry is ${edge.optimalEntry.toFixed(digits)}, hard stop loss invalidation protected above the cleared sweep high at ${edge.hardStopLoss.toFixed(digits)}, targeting Take Profit 1 at ${edge.targetTP1.toFixed(digits)} and Take Profit 2 at ${edge.targetTP2.toFixed(digits)}.`;
+      customSpokenText = `Instant accurate Sell signal locked on ${fullName} at ${spokenPStr}. Pre-signal liquidity audit complete: all attracting overhead buy-stop liquidity at ${formatPriceForAudio(Number(sweptPrice), symbol)} has been taken out, and the Judas swing manipulation spike above Value Area High ${spokenVAH} was absorbed and rejected. Zero remaining overhead magnet. Aggressive buyers are ${modelOutput.exhaustion.exhaustionScore} percent exhausted with ${modelOutput.exhaustion.powerRemaining} percent power remaining. Order flow delta is ${deltaStr}. Optimal entry is ${spokenEntry}, hard stop loss invalidation protected above the cleared sweep high at ${spokenSL}, targeting Take Profit 1 at ${spokenTP1} and Take Profit 2 at ${spokenTP2}.`;
       tags.push('SELL', 'POST_SWEEP_LOCKED', 'MANIPULATION_CLEARED', 'SHORT');
       formattedText = `## 🔴 INSTANT SELL SIGNAL — POST-SWEEP & MANIPULATION CLEARED
  
@@ -245,6 +261,83 @@ Watching for trapped long liquidation to slice through the Low Volume Node towar
       break;
     }
 
+    case 'CONFIRMED_REVERSAL': {
+      priority = 'CRITICAL';
+      const isBull = extra?.reversalSide ? extra.reversalSide === 'BULLISH' : (edge.triggerAction === 'SNIPER_BUY' || price <= Number(val));
+      const reversalSide = isBull ? 'BULLISH' : 'BEARISH';
+      const levelName = extra?.reversalLevelName || (isBull ? `Value Area Low (${val})` : `Value Area High (${vah})`);
+      const defPrice = extra?.defendedPrice ?? (isBull ? Number(val) : Number(vah));
+      const defPriceStr = defPrice.toFixed(digits);
+      const targetP = extra?.targetPrice ?? Number(poc);
+      const targetStr = targetP.toFixed(digits);
+      const exhaustPct = extra?.exhaustionPct ?? Math.max(86, modelOutput.exhaustion.exhaustionScore || 88);
+      const trappedCrowd = modelOutput.exhaustion?.trappedCrowdLabel || 
+        (isBull ? 'Trapped breakdown shorts forced to cover' : 'Trapped breakout longs forced to liquidate');
+
+      headline = `↩️ CONFIRMED REVERSAL TRIGGERED — ${fullName}`;
+      summary = `${reversalSide} reversal confirmed at ${levelName} (${defPriceStr}). Counterparties reached ${exhaustPct}% exhaustion; extreme rejected and value reclaimed, targeting ${targetStr}.`;
+      customSpokenText = `Confirmed ${isBull ? 'bullish' : 'bearish'} reversal alert on ${fullName} at ${spokenPStr}! Institutional limit orders absorbed the extreme push at ${levelName}. Aggressive ${isBull ? 'sellers' : 'buyers'} are ${exhaustPct} percent exhausted with zero follow-through. Price has rejected the extreme and reclaimed value. High-conviction ${isBull ? 'long' : 'short'} reversal underway targeting Point of Control ${formatPriceForAudio(targetP, symbol)}.`;
+      tags.push('REVERSAL', 'CONFIRMED_REVERSAL', isBull ? 'BULLISH_REVERSAL' : 'BEARISH_REVERSAL', 'ABSORPTION_RECLAIM');
+
+      formattedText = `## ↩️ CONFIRMED REVERSAL TRIGGERED — VALUE AREA RECLAIM
+ 
+**PAIR:** ${fullName}
+**ALERT:** CONFIRMED REVERSAL (INSTITUTIONAL ABSORPTION + VALUE RECLAIM)
+**PRICE:** ${pStr}
+**DEFENDED EXTREME:** ${levelName} (${defPriceStr})
+**REVERSAL DIRECTION:** ${reversalSide} (Fading ${isBull ? 'Seller' : 'Buyer'} Exhaustion)
+**PRIMARY TARGET:** POC Equilibrium (${targetStr})
+
+### 1. CAUSE OF THE REVERSAL
+* **Effort vs Result Divergence:** Aggressive ${isBull ? 'selling' : 'buying'} volume poured into the extreme at ${defPriceStr}, but produced zero price continuation (iceberg limit absorption confirmed).
+* **Counterparty Depletion:** Opposing initiative reached **${exhaustPct}% exhaustion**; fuel for further expansion is completely depleted.
+* **Trapped Liquidity:** ${trappedCrowd} locked offsides at the extreme, creating forced liquidation fuel that accelerates the reversal.
+* **Value Reclaim:** Price broke back inside the accepted auction boundaries (${isBull ? `reclaimed above VAL ${val}` : `rejected below VAH ${vah}`}).
+
+### 2. EXECUTION ROADMAP
+* **Action:** Enter ${isBull ? 'BUY' : 'SELL'} on the confirmed value reclaim
+* **Defended Wall / Invalidation:** Stop loss protected behind the absorption wick at ${edge.hardStopLoss.toFixed(digits)}
+* **Target 1:** POC Equilibrium (${poc})
+* **Target 2:** Opposite Value Area Boundary (${isBull ? vah : val})
+* **Risk/Reward:** Favorable asymmetrical edge with capped micro-scratch risk`;
+      break;
+    }
+
+    case 'LIQUIDITY_BYPASS_WARNING': {
+      priority = 'CRITICAL';
+      const lvlName = extra?.reversalLevelName || 'Resting Limit Wall';
+      const defP = extra?.defendedPrice ? extra.defendedPrice.toFixed(digits) : (price >= Number(vah) ? vah : val);
+      const side = extra?.dominantSide || (price >= Number(defP) ? 'BUY' : 'SELL');
+      const isAggressiveBuy = side === 'BUY';
+      const spoofRate = extra?.trappedPct ?? Math.round((mi?.liquidity?.spoofDetector?.spoofProbability ?? 0.65) * 100);
+      const incomingLots = extra?.totalLotStack || 1350;
+
+      headline = `⚠️ LIQUIDITY BYPASS WARNING (WALL CONSUMPTION / PULLING) — ${fullName}`;
+      summary = `Resting limit defense at ${lvlName} (${defP}) is failing. Aggressive ${side.toLowerCase()} volume (${incomingLots} lots) is consuming depth with ${spoofRate}% pulling probability. Counter-trend reversal strictly blocked.`;
+      customSpokenText = `Liquidity bypass warning on ${fullName} at ${spokenPStr}! The resting limit wall at ${lvlName} ${formatPriceForAudio(Number(defP), symbol)} is being overwhelmed by aggressive market ${side.toLowerCase()} orders. High order pulling rate and low passive absorption detected. Do not fade this move. Reversals are strictly invalidated as price bypasses the level.`;
+      tags.push('LIQUIDITY_BYPASS', 'WALL_PENETRATION', 'PULLING_SPOOF', 'REVERSAL_INVALIDATED');
+
+      formattedText = `## ⚠️ LIQUIDITY BYPASS WARNING — WALL BEING OVERWHELMED
+ 
+**PAIR:** ${fullName}
+**ALERT:** LIQUIDITY BYPASS & WALL PENETRATION WARNING
+**CURRENT PRICE:** ${pStr}
+**TARGETED WALL:** ${lvlName} (${defP})
+**AGGRESSIVE INITIATIVE:** Aggressive ${isAggressiveBuy ? 'Buyers' : 'Sellers'} (${incomingLots} Lots)
+**SPOOF / PULLING HAZARD:** ${spoofRate}% Probability of Phantom Limit Depth
+
+### 1. WHY PRICE IS BYPASSING INSTEAD OF REVERSING
+* **Effort vs Result (Effort Rewarded):** Aggressive market initiative is displacing price directly through resting orders. Passive limit orders are NOT absorbing the push; they are being consumed.
+* **Order Pulling / Phantom Liquidity:** The resting orders seen on the heatmap are showing an elevated cancellation rate (**${spoofRate}% pulling rate**) as price approaches, leaving an empty liquidity vacuum.
+* **Genuine Price Discovery:** Participation volume is rising with consecutive bar closes outside value. This is **trend expansion**, NOT a failed auction reversion.
+* **Stop-Loss Squeeze Magnet:** Retail stops stacked behind ${defP} are acting as fuel, accelerating the bypass.
+
+### 2. TACTICAL DIRECTIVE
+* **⛔ STRICTLY DO NOT ENTER REVERSALS:** Attempting to fade this move exposes the position to severe runaway slippage.
+* **Stand Down & Protect Capital:** Allow price discovery to finish. Wait for the market to find an actual exhaustion climax before considering any new setup.`;
+      break;
+    }
+
     case 'ORDER_STACKING_BUILDUP': {
       priority = 'HIGH';
       const side = extra?.dominantSide || (modelOutput.orderFlow.deltaTrend === 'POSITIVE' ? 'BUY' : 'SELL');
@@ -254,7 +347,7 @@ Watching for trapped long liquidation to slice through the Low Volume Node towar
       const anchorP = extra?.anchorPrice ? extra.anchorPrice.toFixed(digits) : pStr;
       headline = `${isBuy ? '🟢' : '🔴'} INSTITUTIONAL ${side} STACK ACCUMULATING (${lots} LOTS) — ${fullName}`;
       summary = `${blocks} consecutive institutional ${side.toLowerCase()} blocks (${lots} contracts) stacking around ${anchorP}. Tape coiling with ${deltaStr} delta pressure ahead of directional release.`;
-      customSpokenText = `Institutional order flow alert on ${fullName} at ${pStr}. Heavy ${side.toLowerCase()} side contract stacking is underway around ${anchorP}, with ${blocks} consecutive institutional blocks totaling ${lots} lots locking into the footprint. Cumulative volume delta is shifting ${isBuy ? 'bullish' : 'bearish'} at ${deltaStr} while passive ${isBuy ? 'bid reload walls' : 'offer distribution walls'} absorb counter-flow. Watch for an imminent volatility release toward ${isBuy ? vah : val}.`;
+      customSpokenText = `Institutional order flow alert on ${fullName} at ${spokenPStr}. Heavy ${side.toLowerCase()} side contract stacking is underway around ${formatPriceForAudio(Number(anchorP), symbol)}, with ${blocks} consecutive institutional blocks totaling ${lots} lots locking into the footprint. Cumulative volume delta is shifting ${isBuy ? 'bullish' : 'bearish'} at ${deltaStr} while passive ${isBuy ? 'bid reload walls' : 'offer distribution walls'} absorb counter-flow. Watch for an imminent volatility release toward ${isBuy ? spokenVAH : spokenVAL}.`;
       tags.push('ORDER_STACKING', `${side}_ACCUMULATION`, 'FOOTPRINT_CLUSTER', 'TAPE_COILING');
       formattedText = `## ${isBuy ? '🟢' : '🔴'} INSTITUTIONAL ${side}-SIDE CONTRACT STACKING & TAPE COILING
  
@@ -286,7 +379,7 @@ When heavy ${side.toLowerCase()} contracts stack across consecutive footprint no
       const lots = extra?.totalLotStack || 1690;
       headline = `${isBullSqueeze ? '🟢' : '🔴'} ${isBullSqueeze ? 'SHORT-COVERING' : 'LONG-LIQUIDATION'} SQUEEZE IN PROGRESS — ${fullName}`;
       summary = `${trappedPct}% underwater retail ${isBullSqueeze ? 'shorts' : 'longs'} caught offside at ${pStr}. Forced stop-covering colliding with ${lots} lots of institutional ${side.toLowerCase()} flow.`;
-      customSpokenText = `Critical liquidation squeeze alert on ${fullName} at ${pStr}. A high-velocity ${isBullSqueeze ? 'short-covering squeeze' : 'long-liquidation cascade'} is actively unfolding on the chart. ${trappedPct} percent of retail ${isBullSqueeze ? 'sellers' : 'buyers'} are trapped underwater and being forced to cover into a thin order book alongside ${lots} contracts of aggressive institutional ${side.toLowerCase()} flow. Price is accelerating toward ${isBullSqueeze ? vah : val}.`;
+      customSpokenText = `Critical liquidation squeeze alert on ${fullName} at ${spokenPStr}. A high-velocity ${isBullSqueeze ? 'short-covering squeeze' : 'long-liquidation cascade'} is actively unfolding on the chart. ${trappedPct} percent of retail ${isBullSqueeze ? 'sellers' : 'buyers'} are trapped underwater and being forced to cover into a thin order book alongside ${lots} contracts of aggressive institutional ${side.toLowerCase()} flow. Price is accelerating toward ${isBullSqueeze ? spokenVAH : spokenVAL}.`;
       tags.push('LIQUIDATION_SQUEEZE', isBullSqueeze ? 'SHORT_SQUEEZE' : 'LONG_LIQUIDATION', 'TRAPPED_CROWD');
       formattedText = `## ${isBullSqueeze ? '🟢 SHORT-COVERING SQUEEZE' : '🔴 LONG-LIQUIDATION SQUEEZE'} — FORCED UNWIND ACTIVE
  
@@ -316,7 +409,7 @@ When heavy ${side.toLowerCase()} contracts stack across consecutive footprint no
       const lots = extra?.totalLotStack || 1820;
       headline = `⚡ ${isUpImpulse ? 'BULLISH' : 'BEARISH'} VELOCITY IGNITION & LVN BREAKOUT — ${fullName}`;
       summary = `Vertical ${isUpImpulse ? 'upside' : 'downside'} displacement (+${velPips} pips burst) at ${pStr}. Initiative ${side.toLowerCase()} blocks (${lots} lots) slicing through thin liquidity pocket.`;
-      customSpokenText = `Velocity ignition alert on ${fullName} at ${pStr}! Price is displacing rapidly ${isUpImpulse ? 'upward' : 'downward'} with a ${velPips} pip momentum burst. Aggressive institutional ${side.toLowerCase()} sweeps totaling ${lots} contracts have broken through resting depth into a low volume node vacuum. Path of least resistance is wide open toward ${isUpImpulse ? edge.targetTP1.toFixed(digits) : edge.targetTP1.toFixed(digits)}.`;
+      customSpokenText = `Velocity ignition alert on ${fullName} at ${spokenPStr}! Price is displacing rapidly ${isUpImpulse ? 'upward' : 'downward'} with a ${velPips} pip momentum burst. Aggressive institutional ${side.toLowerCase()} sweeps totaling ${lots} contracts have broken through resting depth into a low volume node vacuum. Path of least resistance is wide open toward ${spokenTP1}.`;
       tags.push('IMPULSE_IGNITION', isUpImpulse ? 'UPSIDE_DISPLACEMENT' : 'DOWNSIDE_DISPLACEMENT', 'MOMENTUM_BURST');
       formattedText = `## ⚡ ${isUpImpulse ? 'BULLISH' : 'BEARISH'} VELOCITY IGNITION — VERTICAL TAPE DISPLACEMENT
  
@@ -353,7 +446,7 @@ Aggressive market ${isUpImpulse ? 'buyers' : 'sellers'} have overwhelmed the res
 
       headline = `${isBuyClimax ? '🔴' : '🟢'} ${climaxTypeLabel} (${volZ}x VOL SPIKE) — ${fullName}`;
       summary = `Parabolic ${isBuyClimax ? 'buying' : 'selling'} climax at ${climaxLevel} (${volZ}x volume, ${deltaZ}σ delta) absorbed by institutional limit wall with ${wickPct}% wick rejection. High-conviction ${reversalDir} armed.`;
-      customSpokenText = `Climactic ${isBuyClimax ? 'buy' : 'sell'} exhaustion alert on ${fullName} at ${pStr}. A parabolic ${isBuyClimax ? 'buying' : 'selling'} climax at ${climaxLevel} printed ${volZ} times average volume and ${deltaZ} sigma delta, but hit a dense institutional ${isBuyClimax ? 'sell wall' : 'buy mattress'} with ${wickPct} percent wick rejection and zero continuation. Late ${isBuyClimax ? 'buyers' : 'sellers'} are trapped at the extreme, arming a high-conviction ${isBuyClimax ? 'short' : 'long'} reversal toward ${poc}.`;
+      customSpokenText = `Climactic ${isBuyClimax ? 'buy' : 'sell'} exhaustion alert on ${fullName} at ${spokenPStr}. A parabolic ${isBuyClimax ? 'buying' : 'selling'} climax at ${formatPriceForAudio(Number(climaxLevel), symbol)} printed ${volZ} times average volume and ${deltaZ} sigma delta, but hit a dense institutional ${isBuyClimax ? 'sell wall' : 'buy mattress'} with ${wickPct} percent wick rejection and zero continuation. Late ${isBuyClimax ? 'buyers' : 'sellers'} are trapped at the extreme, arming a high-conviction ${isBuyClimax ? 'short' : 'long'} reversal toward ${spokenPOC}.`;
       tags.push('CLIMACTIC_EXHAUSTION', isBuyClimax ? 'BUY_CLIMAX' : 'SELL_CLIMAX', 'BLOW_OFF_REVERSAL');
       formattedText = `## ${isBuyClimax ? '🔴 CLIMACTIC BUY EXHAUSTION' : '🟢 CLIMACTIC SELL EXHAUSTION'} — BLOW-OFF ABSORPTION
  
@@ -387,7 +480,7 @@ Aggressive market ${isUpImpulse ? 'buyers' : 'sellers'} have overwhelmed the res
 
       headline = `🌀 TIGHT COMPRESSION & ORDER COILING (${compPct}% CONTRACTION) — ${fullName}`;
       summary = `Volatility compressed to ${atrRatio}x ATR around ${pStr} while ${coiledLots} institutional contracts stack in the book. Coiling for ${isBullCoil ? 'upside' : 'downside'} expansion.`;
-      customSpokenText = `Volatility compression and tape coiling alert on ${fullName} at ${pStr}. Candle ranges have contracted by ${compPct} percent to ${atrRatio} times average true range while ${coiledLots} institutional contracts have accumulated inside the tight range. Order book depth and cumulative delta favor a ${isBullCoil ? 'bullish upside' : 'bearish downside'} breakout expansion toward ${isBullCoil ? vah : val}.`;
+      customSpokenText = `Volatility compression and tape coiling alert on ${fullName} at ${spokenPStr}. Candle ranges have contracted by ${compPct} percent to ${atrRatio} times average true range while ${coiledLots} institutional contracts have accumulated inside the tight range. Order book depth and cumulative delta favor a ${isBullCoil ? 'bullish upside' : 'bearish downside'} breakout expansion toward ${isBullCoil ? spokenVAH : spokenVAL}.`;
       tags.push('COMPRESSION_COIL', 'VOLATILITY_SQUEEZE', 'TAPE_COILING', bias);
       formattedText = `## 🌀 TIGHT COMPRESSION & INSTITUTIONAL ORDER COILING
  
@@ -419,7 +512,7 @@ Aggressive market ${isUpImpulse ? 'buyers' : 'sellers'} have overwhelmed the res
 
       headline = `${isRejAtCeiling ? '🔴' : '🟢'} AUCTION REFUSAL — ${fullName}`;
       summary = `Auction Refusal at ${lvlName} (${lvlPrice}). Aggressive test refused by ${rejSide.toLowerCase()}.`;
-      customSpokenText = `Auction refusal detected on ${fullName} at ${pStr}. The test of ${lvlName} at ${lvlPrice} was firmly refused by ${rejSide.toLowerCase()} with heavy passive limit absorption. The market refused ${isRejAtCeiling ? 'higher' : 'lower'} prices and is rotating back toward fair value. Order flow delta is ${deltaStr}.`;
+      customSpokenText = `Auction refusal detected on ${fullName} at ${spokenPStr}. The test of ${lvlName} at ${formatPriceForAudio(Number(lvlPrice), symbol)} was firmly refused by ${rejSide.toLowerCase()} with heavy passive limit absorption. The market refused ${isRejAtCeiling ? 'higher' : 'lower'} prices and is rotating back toward fair value. Order flow delta is ${deltaStr}.`;
       tags.push('AUCTION_REFUSAL', 'REJECTION', lvlName.replace(/\s+/g, '_').toUpperCase());
       formattedText = `## ${isRejAtCeiling ? '🔴' : '🟢'} AUCTION REFUSAL DETECTED
  
@@ -457,7 +550,7 @@ ${lvlPrice} (Refusal Boundary — A sustained close beyond this level is require
 
       headline = `🟢 AUCTION ACCEPTANCE — ${fullName}`;
       summary = `Auction Acceptance above ${lvlName} (${lvlPrice}). Sustained volume confirmed.`;
-      customSpokenText = `Auction acceptance confirmed on ${fullName} at ${pStr}. Price has accepted ${accSide === 'BUYERS' ? 'above' : 'below'} ${lvlName} at ${lvlPrice} with sustained initiative delta. The auction is expanding toward next liquidity pool.`;
+      customSpokenText = `Auction acceptance confirmed on ${fullName} at ${spokenPStr}. Price has accepted ${accSide === 'BUYERS' ? 'above' : 'below'} ${lvlName} at ${formatPriceForAudio(Number(lvlPrice), symbol)} with sustained initiative delta. The auction is expanding toward next liquidity pool.`;
       tags.push('AUCTION_ACCEPTANCE', 'BREAKOUT', lvlName.replace(/\s+/g, '_').toUpperCase());
       formattedText = `## 🟢 AUCTION ACCEPTANCE CONFIRMED
  
@@ -493,7 +586,7 @@ Price has established confirmed value acceptance beyond ${lvlName} at ${lvlPrice
 
       headline = `KEY LEVEL INTERACTION — ${fullName}`;
       summary = `Price interacting with ${targetLevelName} at ${targetLevelPrice}. ${refusalNote}`;
-      customSpokenText = `Key level interaction on ${fullName} at ${pStr}. Price is testing ${targetLevelName} at ${targetLevelPrice}. Order flow is evaluating acceptance versus refusal. Passive limit orders are actively reloading.`;
+      customSpokenText = `Key level interaction on ${fullName} at ${spokenPStr}. Price is testing ${targetLevelName} at ${formatPriceForAudio(Number(targetLevelPrice), symbol)}. Order flow is evaluating acceptance versus refusal. Passive limit orders are actively reloading.`;
       tags.push('KEY_LEVEL', 'INTERACTION', targetLevelName.replace(/\s+/g, '_').toUpperCase());
       formattedText = `## KEY LEVEL INTERACTION
  
@@ -521,7 +614,7 @@ The market is interacting directly with ${targetLevelName}. ${refusalNote}
       const isB = b.side === 'buy';
       headline = `LARGE TRADE ALERT — ${fullName}`;
       summary = `Large ${isB ? 'BUY' : 'SELL'} contract executed (${b.volume || 480} contracts) at ${pStr}.`;
-      customSpokenText = `Large institutional trade detected on ${fullName} at ${pStr}. An executed block of ${b.volume || 480} contracts on the ${isB ? 'buy' : 'sell'} side shifted instant delta by ${b.delta > 0 ? `+${b.delta}` : b.delta}. Order book is actively absorbing the execution.`;
+      customSpokenText = `Large institutional trade detected on ${fullName} at ${spokenPStr}. An executed block of ${b.volume || 480} contracts on the ${isB ? 'buy' : 'sell'} side shifted instant delta by ${b.delta > 0 ? `+${b.delta}` : b.delta}. Order book is actively absorbing the execution.`;
       tags.push('LARGE_TRADE', isB ? 'BUY_TRADE' : 'SELL_TRADE', 'FOOTPRINT');
       formattedText = `## LARGE TRADE ALERT
  
@@ -553,7 +646,7 @@ Do not assume a large trade alone guarantees continuation. If price reverses thr
       const cond = mi?.whyPriceIsMoving.headline || 'Low Volume Node Transit';
       headline = `ORDER FLOW ALERT — ${fullName}`;
       summary = `Order flow event: ${cond} at ${pStr}.`;
-      customSpokenText = `Order flow condition alert on ${fullName} at ${pStr}. Market condition is ${cond}. Visible order book depth exhibits an imbalance of ${mi?.liquidity.liquidityImbalance ?? '+24'} percent with ${mi?.whyPriceIsMoving.marketControl.dominantController || 'buyers'} in control. Watching for expansion toward next liquidity shelf.`;
+      customSpokenText = `Order flow condition alert on ${fullName} at ${spokenPStr}. Market condition is ${cond}. Visible order book depth exhibits an imbalance of ${mi?.liquidity.liquidityImbalance ?? '+24'} percent with ${mi?.whyPriceIsMoving.marketControl.dominantController || 'buyers'} in control. Watching for expansion toward next liquidity shelf.`;
       tags.push('ORDER_FLOW', 'DELTA', 'LIQUIDITY');
       formattedText = `## ORDER FLOW ALERT
  
@@ -620,7 +713,7 @@ Never place blind breakout market orders inside the release window. Wait for pos
       const side = extra?.tradeUnderPressureSide || (edge.triggerAction === 'SNIPER_BUY' ? 'BUY' : 'SELL');
       headline = `TRADE UNDER PRESSURE — ${fullName}`;
       summary = `Active ${side} trade is moving against us toward stop-loss area.`;
-      customSpokenText = `Trade under pressure warning on ${fullName}. Active ${side} position is being tested near ${pStr}. Opposing aggressive delta surged into the tape. Strictly honor the hard stop loss at ${edge.hardStopLoss.toFixed(digits)}.`;
+      customSpokenText = `Trade under pressure warning on ${fullName}. Active ${side} position is being tested near ${spokenPStr}. Opposing aggressive delta surged into the tape. Strictly honor the hard stop loss at ${spokenSL}.`;
       tags.push('UNDER_PRESSURE', 'RISK', side);
       formattedText = `## TRADE UNDER PRESSURE
  
@@ -658,7 +751,7 @@ Strictly honor the stop loss. Never widen a stop-loss or average into an active 
       const tgt = extra?.targetName || 'TP1';
       headline = `TAKE-PROFIT REACHED — CONTINUATION — ${fullName}`;
       summary = `${tgt} reached at ${pStr}. Assessing continuation vs exhaustion.`;
-      customSpokenText = `Take profit ${tgt} achieved on ${fullName} at ${pStr}. Order flow delta remains strongly aligned with continuation momentum. Stop loss is trailed to breakeven, runner position targeting ${tgt === 'TP1' ? `Take Profit 2 at ${edge.targetTP2.toFixed(digits)}` : `Take Profit 3 macro liquidity at ${edge.targetTP3.toFixed(digits)}`}.`;
+      customSpokenText = `Take profit ${tgt} achieved on ${fullName} at ${spokenPStr}. Order flow delta remains strongly aligned with continuation momentum. Stop loss is trailed to breakeven, runner position targeting ${tgt === 'TP1' ? `Take Profit 2 at ${spokenTP2}` : `Take Profit 3 macro liquidity at ${spokenTP3}`}.`;
       tags.push('TAKE_PROFIT', tgt, 'CONTINUATION');
       formattedText = `## TAKE-PROFIT REACHED — CONTINUATION
  
@@ -691,7 +784,7 @@ As rule specifies: With ${tgt} secured, hard stop-loss is trailed to Breakeven (
       priority = 'CRITICAL';
       headline = `SETUP INVALIDATED — ${fullName}`;
       summary = `Setup invalidated. Market conditions have changed; standing down.`;
-      customSpokenText = `Setup invalidated on ${fullName}. Price broke through defined structural level at ${edge.hardStopLoss.toFixed(digits)} with heavy opposing delta. Defensive institutional limit wall failed to hold. Standing down immediately and scanning next setup.`;
+      customSpokenText = `Setup invalidated on ${fullName}. Price broke through defined structural level at ${spokenSL} with heavy opposing delta. Defensive institutional limit wall failed to hold. Standing down immediately and scanning next setup.`;
       tags.push('INVALIDATED', 'RISK', 'STAND_DOWN');
       formattedText = `## SETUP INVALIDATED
  
@@ -812,8 +905,8 @@ Following the consumption and exhaustion of the opposing liquidity, market maker
         ? `Unswept liquidity magnet at ${unclaimedPool} is still attracting price. Standing down until stop-hunt & manipulation complete.`
         : `Caution: Divergent order flow or unstable liquidity at ${pStr}.`;
       customSpokenText = isWaitingForSweep
-        ? `Premature signal guard active on ${fullName} at ${pStr}. An unswept liquidity pool at ${unclaimedPool} is still attracting price. Issuing a trade signal before ${unclaimedPool} is taken out would be premature. The scanner is waiting for the stop-hunt manipulation sweep and institutional absorption to complete before firing an instant signal.`
-        : `Market caution on ${fullName} at ${pStr}. Divergent order flow and unstable limit book liquidity detected. Avoid premature execution and wait for confirmed footprint delta.`;
+        ? `Premature signal guard active on ${fullName} at ${spokenPStr}. An unswept liquidity pool at ${formatPriceForAudio(Number(unclaimedPool), symbol)} is still attracting price. Issuing a trade signal before ${formatPriceForAudio(Number(unclaimedPool), symbol)} is taken out would be premature. The scanner is waiting for the stop-hunt manipulation sweep and institutional absorption to complete before firing an instant signal.`
+        : `Market caution on ${fullName} at ${spokenPStr}. Divergent order flow and unstable limit book liquidity detected. Avoid premature execution and wait for confirmed footprint delta.`;
       tags.push('CAUTION', 'PRE_SWEEP_HOLD', 'RISK');
       formattedText = `## ${isWaitingForSweep ? '⏳ PREMATURE SIGNAL BLOCKED — WAITING FOR LIQUIDITY SWEEP' : 'MARKET CAUTION'}
  
@@ -893,6 +986,57 @@ export function detectDynamicVisualTapeAlert(
   // 3. Check Trapped Underwater Crowd in Right Book
   const trappedShortsPct = Math.round(snapshot.rightBook?.lossSellersPct || 0);
   const trappedLongsPct = Math.round(snapshot.rightBook?.lossBuyersPct || 0);
+  const mi = modelOutput.marketIntelligence;
+
+  // Condition 0: Confirmed Absorption Reversal at Auction Extreme / Defended Wall
+  const vaar = modelOutput.valueAreaAbsorptionReclaim;
+  if (vaar && vaar.status === 'ABSORPTION_AND_RECLAIM_TRIGGERED' && vaar.signal?.triggerConditionMet) {
+    const isBull = vaar.activeSide === 'LONG_BELOW_VAL' || vaar.signal.action === 'BUY';
+    return buildStructuredAlert(
+      'CONFIRMED_REVERSAL',
+      symbol,
+      price,
+      modelOutput,
+      modelOutput.marketIntelligence,
+      {
+        reversalSide: isBull ? 'BULLISH' : 'BEARISH',
+        reversalLevelName: vaar.defendedLevelLabel,
+        defendedPrice: vaar.defendedLevel,
+        targetPrice: modelOutput.valueStructure.poc,
+        exhaustionPct: Math.max(88, modelOutput.exhaustion.exhaustionScore || 90),
+      }
+    );
+  }
+
+  // Condition 0.5: Proactive Liquidity Bypass / Wall Penetration Warning
+  const spoofingProb = mi?.liquidity?.spoofDetector?.spoofProbability ?? 0;
+  const isUnstableLimit = spoofingProb >= 0.50 || (snapshot.leftBook?.sellLimitPct < 22 && snapshot.leftBook?.buyLimitPct < 22);
+  const vah = modelOutput.valueStructure.vah;
+  const val = modelOutput.valueStructure.val;
+  const distToVah = Math.abs(price - vah) / (vah || 1);
+  const distToVal = Math.abs(price - val) / (val || 1);
+
+  const isTestingWall = distToVah < 0.0025 || distToVal < 0.0025;
+  const isOverwhelmingBuy = distToVah < 0.0025 && (buyLotSum > sellLotSum * 1.6 || buyLotSum >= 1100) && lastBody > 0;
+  const isOverwhelmingSell = distToVal < 0.0025 && (sellLotSum > buyLotSum * 1.6 || sellLotSum >= 1100) && lastBody < 0;
+
+  if (isTestingWall && (isUnstableLimit || isOverwhelmingBuy || isOverwhelmingSell)) {
+    const isAtCeiling = distToVah <= distToVal;
+    return buildStructuredAlert(
+      'LIQUIDITY_BYPASS_WARNING',
+      symbol,
+      price,
+      modelOutput,
+      mi,
+      {
+        reversalLevelName: isAtCeiling ? 'Value Area High Ceiling' : 'Value Area Low Support Shelf',
+        defendedPrice: isAtCeiling ? vah : val,
+        dominantSide: isAtCeiling ? 'BUY' : 'SELL',
+        trappedPct: Math.round(spoofingProb * 100),
+        totalLotStack: isAtCeiling ? buyLotSum : sellLotSum,
+      }
+    );
+  }
 
   // Condition A: High-Velocity Impulse Ignition (Price displacing rapidly through liquidity vacuum)
   const isStrongImpulse =
@@ -940,7 +1084,6 @@ export function detectDynamicVisualTapeAlert(
   }
 
   // Condition C: Climactic Buy / Sell Exhaustion at Auction Extreme
-  const mi = modelOutput.marketIntelligence;
   if (mi?.climactic?.isClimactic && mi.climactic.climaxScore >= 82) {
     const isBuyClimax = mi.climactic.climacticDirection === 'CLIMACTIC_BUY_EXHAUSTION';
     return buildStructuredAlert(

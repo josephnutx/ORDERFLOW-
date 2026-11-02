@@ -3,6 +3,19 @@
 
 import { INSTRUMENTS } from './mockDataGenerator';
 
+export const DIGIT_WORDS: Record<string, string> = {
+  '0': 'zero',
+  '1': 'one',
+  '2': 'two',
+  '3': 'three',
+  '4': 'four',
+  '5': 'five',
+  '6': 'six',
+  '7': 'seven',
+  '8': 'eight',
+  '9': 'nine',
+};
+
 export function getInstrumentPrecision(symbol: string): number {
   if (!symbol) return 2;
   const sym = symbol.toUpperCase().trim();
@@ -24,28 +37,61 @@ export function formatPriceExact(price: number, symbol: string): string {
 }
 
 /**
- * Phonetically formats a price for Text-to-Speech synthesis engines (especially on Android / Chrome)
- * to prevent TTS engines from eating leading decimal zeroes (e.g. 1.08450 -> "one point eight"),
+ * Phonetically formats a price for Text-to-Speech synthesis engines (especially on Android / Chrome / iOS)
+ * to prevent TTS engines from eating leading or trailing zeroes (e.g. 1.08450 -> "one point eight" or "1.08"),
  * misinterpreting decimals as software version numbers or dates, or truncating significant digits.
+ * 
+ * Spells each decimal digit as plain English words ("zero eight four five zero") so the voice is 100% exact.
  */
 export function formatPriceForAudio(price: number, symbol: string): string {
-  if (typeof price !== 'number' || isNaN(price)) return '0.00';
+  if (typeof price !== 'number' || isNaN(price)) return '0 point zero zero';
   const digits = getInstrumentPrecision(symbol);
   const formatted = price.toFixed(digits);
-  
-  // For forex pairs with 4 or 5 decimal digits (EURUSD, GBPUSD, etc.), spell out digits after the decimal point
-  // so Android TTS crystal-clearly announces each digit without omitting zeroes or rounding.
-  if (digits >= 4) {
-    const [whole, decimal] = formatted.split('.');
-    if (decimal) {
-      // Space out decimal digits: "0 8 5 4 2"
-      const spacedDecimal = decimal.split('').join(' ');
-      return `${whole} point ${spacedDecimal}`;
-    }
-  }
+  const [whole, decimal] = formatted.split('.');
 
-  // For 2 or 3 digits (Gold, JPY, Indices), standard decimal format is spoken reliably
-  return formatted;
+  if (!decimal) return whole;
+
+  // Spell each decimal digit phonetically in plain English words ("zero eight four five zero")
+  // This guarantees 100% exact pronunciation on all browser TTS engines (Chrome, Android, iOS, Windows, Mac),
+  // completely preventing decimal truncation, dropped zeroes, version-number confusion, and rounding errors.
+  const phoneticDecimals = decimal
+    .split('')
+    .map((d) => DIGIT_WORDS[d] || d)
+    .join(' ');
+
+  return `${whole} point ${phoneticDecimals}`;
+}
+
+/**
+ * Converts any raw price decimals embedded in speech text into crystal-clear phonetic words
+ * so that Web Speech API never mispronounces, truncates, or rounds prices when speaking.
+ * Preserves percentages (e.g. "68.5%"), multipliers ("2.4x"), time, and non-price numbers.
+ */
+export function phoneticallyFormatAllPricesInText(text: string): string {
+  if (!text) return '';
+
+  return text
+    // 1. Convert decimals like "1.08450" or "2742.50" or "152.65" into "1 point zero eight four five zero"
+    // Negative lookahead ensures we do NOT convert percentages (e.g. "68.5%"), multipliers ("2.4x"), or time units
+    .replace(
+      /\b(\d+)\.(\d{1,5})\b(?!\s*[%xX]|(?:\s*(?:percent|times|pips|sec|min|hours|days|sigma|σ)))/g,
+      (_match, whole, decimals) => {
+        const words = decimals
+          .split('')
+          .map((d: string) => DIGIT_WORDS[d] || d)
+          .join(' ');
+        return `${whole} point ${words}`;
+      }
+    )
+    // 2. Also convert existing spaced digit representations like "point 0 8 4 5 0" to "point zero eight four five zero"
+    .replace(/point\s+((?:[0-9]\s*)+)/gi, (_match, digitsGroup) => {
+      const cleanedDigits = digitsGroup.trim().replace(/\s+/g, '');
+      const words = cleanedDigits
+        .split('')
+        .map((d: string) => DIGIT_WORDS[d] || d)
+        .join(' ');
+      return `point ${words}`;
+    });
 }
 
 /**
@@ -78,4 +124,3 @@ export function reconcileScriptPrices(
 
   return reconciled;
 }
-

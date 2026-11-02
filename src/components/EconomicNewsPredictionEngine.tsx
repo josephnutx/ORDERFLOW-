@@ -2,9 +2,8 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   Flame, 
   Target, 
-  Zap, 
   TrendingUp, 
-  ArrowRight, 
+  TrendingDown,
   Check, 
   Copy, 
   Sparkles, 
@@ -12,22 +11,19 @@ import {
   Volume2, 
   RefreshCw, 
   AlertTriangle,
-  Scale,
   Activity,
   Layers,
   Search,
   CheckCircle2,
-  Calendar,
   History,
-  ShieldAlert,
   ChevronDown,
   ChevronUp,
   Globe,
-  Maximize2,
-  Minimize2,
   ArrowDownRight,
   ArrowUpRight,
-  ShieldCheck
+  ShieldCheck,
+  Radio,
+  FileText
 } from 'lucide-react';
 import { 
   MacroReleaseType, 
@@ -61,22 +57,19 @@ export const EconomicNewsPredictionEngine: React.FC<EconomicNewsPredictionEngine
   onAddNoteToAnalysis,
   selectedAnalysisNotes = [],
 }) => {
-  const [activeTab, setActiveTab] = useState<'UPCOMING' | 'RECENTLY_RELEASED'>('UPCOMING');
+  const [activeTab, setActiveTab] = useState<'UPCOMING' | 'HISTORY'>('UPCOMING');
   const [selectedCategory, setSelectedCategory] = useState<MacroReleaseType | 'ALL'>('ALL');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [liveEvents, setLiveEvents] = useState<RawCalendarEvent[]>([]);
-  const [lastSyncTime, setLastSyncTime] = useState<string>('Just now');
+  const [lastSyncTime, setLastSyncTime] = useState<string>('Live');
   
-  // Track expanded cards so each card expands only after clicked by user to save space
+  // Track expanded cards
   const [expandedCardIds, setExpandedCardIds] = useState<Record<string, boolean>>({});
 
-  // Retrospective card state for passed PPI actual print & error analysis
-  const [isPpiRetrospectiveOpen, setIsPpiRetrospectiveOpen] = useState<boolean>(true);
-
-  // User's detected local timezone and live clock in local time
+  // User's detected local timezone and live clock
   const [userTimeZone, setUserTimeZone] = useState<string>('');
   const [userLocalClock, setUserLocalClock] = useState<string>('');
 
@@ -85,7 +78,7 @@ export const EconomicNewsPredictionEngine: React.FC<EconomicNewsPredictionEngine
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
       setUserTimeZone(tz);
     } catch {
-      setUserTimeZone('Local Timezone');
+      setUserTimeZone('Local Time');
     }
 
     const updateClock = () => {
@@ -104,7 +97,7 @@ export const EconomicNewsPredictionEngine: React.FC<EconomicNewsPredictionEngine
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch live calendar events from the server pipeline
+  // Fetch live calendar events
   const fetchLiveCalendar = useCallback(async () => {
     try {
       setIsRefreshing(true);
@@ -125,16 +118,16 @@ export const EconomicNewsPredictionEngine: React.FC<EconomicNewsPredictionEngine
 
   useEffect(() => {
     fetchLiveCalendar();
-    const interval = setInterval(fetchLiveCalendar, 30_000); // Poll every 30s
+    const interval = setInterval(fetchLiveCalendar, 30_000);
     return () => clearInterval(interval);
   }, [fetchLiveCalendar]);
 
-  // Generate verified upcoming predictions in chronological order (next release first)
+  // Generate upcoming predictions
   const predictions = useMemo(() => {
     return generateCuratedPredictions(currentSymbol, modelOutput, digits, liveEvents);
   }, [currentSymbol, modelOutput, digits, liveEvents]);
 
-  // Get recently released historical events to cleanly separate past from future
+  // Released events for historical tab
   const releasedEvents = useMemo(() => {
     return getRecentlyReleasedEvents(liveEvents);
   }, [liveEvents]);
@@ -151,7 +144,6 @@ export const EconomicNewsPredictionEngine: React.FC<EconomicNewsPredictionEngine
     });
   }, [predictions, selectedCategory, searchQuery]);
 
-  // Toggle card expanded state on click
   const toggleCard = (id: string) => {
     setExpandedCardIds((prev) => ({
       ...prev,
@@ -159,7 +151,6 @@ export const EconomicNewsPredictionEngine: React.FC<EconomicNewsPredictionEngine
     }));
   };
 
-  // Toggle expand / collapse all
   const areAllExpanded = filteredPredictions.length > 0 && filteredPredictions.every((p) => expandedCardIds[p.id]);
   const handleToggleExpandAll = () => {
     if (areAllExpanded) {
@@ -173,46 +164,34 @@ export const EconomicNewsPredictionEngine: React.FC<EconomicNewsPredictionEngine
     }
   };
 
-  // Copy concise prediction briefing (PREDICTIONS ONLY, no SL or TP)
   const handleCopyPrediction = (pred: EconomicNewsPrediction) => {
     const localTime = formatToLocalTime(pred.eventTime);
     const text = `=====================================================
-INSTITUTIONAL PREDICTION: ${pred.title}
+MACRO INTELLIGENCE REPORT: ${pred.title}
 Asset: ${currentSymbol} | Impact: ${pred.impact}
-Countdown: ${pred.countdownFormatted}
-Local Release Time: ${localTime.fullLocalDisplay}
+Countdown: ${pred.countdownFormatted} (${localTime.fullLocalDisplay})
 =====================================================
 
-1. NEWS CONSENSUS:
+1. CONSENSUS & BENCHMARKS:
 • Expected: ${pred.newsPrediction.consensusValue} (Prior: ${pred.newsPrediction.previousValue})
-• Whisper: ${pred.newsPrediction.whisperNumber}
-• Bank Consensus: ${pred.newsPrediction.bankConsensusRange}
-• Summary: ${pred.newsPrediction.headlineForecast}
+• Desk Whisper: ${pred.newsPrediction.whisperNumber}
+• Bank Range: ${pred.newsPrediction.bankConsensusRange}
 
-2. WHY THAT PREDICTION (MACRO DRIVERS):
-${pred.whyPrediction.primaryDrivers.map((d) => `• ${d}`).join('\n')}
-• Leading Signal: ${pred.whyPrediction.leadingIndicatorSignals}
-
-3. WHAT THE MODEL IS SEEING (${currentSymbol}):
+2. ORDER FLOW & POSITIONING:
 • Order Flow: ${pred.modelMarketObservations.orderFlowState}
 • Resting Liquidity: ${pred.modelMarketObservations.restingLiquidity}
-• Delta / CVD: ${pred.modelMarketObservations.cvdDeltaState}
-• Value Area: ${pred.modelMarketObservations.valueAreaPositioning}
-
-4. ASSESSMENT VS NEWS:
+• CVD/Delta: ${pred.modelMarketObservations.cvdDeltaState}
 • Pricing Status: ${pred.assessmentWithNews.pricingStatus.replace(/_/g, ' ')}
-• Market Status: ${pred.assessmentWithNews.pricingExplanation}
 • Trap Warning: ${pred.assessmentWithNews.trapWarning}
 
-5. FINAL PREDICTION (PREDICTIONS ONLY):
->>> ${pred.finalPrediction.verdictCall} <<<
-Conviction: ${pred.finalPrediction.confidenceScore}% (${pred.finalPrediction.directionalBias})
-Expected Action: ${pred.finalPrediction.expectedPriceAction}
+3. MODEL VERDICT & EXPECTED ACTION:
+• Call: ${pred.finalPrediction.verdictCall} (${pred.finalPrediction.confidenceScore}% confidence)
+• Expected Path: ${pred.finalPrediction.expectedPriceAction}
 
-6. RECTIFIED 2-PHASE MOVE SEQUENCE & PLAYBOOK:
-• Phase 1 (Initial Impact): ${pred.twoPhaseMovePrediction?.phase1KneeJerk.direction.replace(/_/g, ' ')} (${pred.twoPhaseMovePrediction?.phase1KneeJerk.duration}) - ${pred.twoPhaseMovePrediction?.phase1KneeJerk.expectedAction}
-• Phase 2 (True Move): ${pred.twoPhaseMovePrediction?.phase2TrueMacroMove.direction.replace(/_/g, ' ')} (${pred.twoPhaseMovePrediction?.phase2TrueMacroMove.duration}) - ${pred.twoPhaseMovePrediction?.phase2TrueMacroMove.expectedAction}
-• THE RIGHT ACTUAL MOVE PLAYBOOK: ${pred.twoPhaseMovePrediction?.theRightActualMovePlaybook.verdictSummary} (${pred.twoPhaseMovePrediction?.theRightActualMovePlaybook.timingAdvice})
+4. 2-PHASE EXECUTION PLAYBOOK:
+• Phase 1 (0-90s): ${pred.twoPhaseMovePrediction?.phase1KneeJerk.direction.replace(/_/g, ' ')} (${pred.twoPhaseMovePrediction?.phase1KneeJerk.duration}) - ${pred.twoPhaseMovePrediction?.phase1KneeJerk.expectedAction}
+• Phase 2 (2-35m): ${pred.twoPhaseMovePrediction?.phase2TrueMacroMove.direction.replace(/_/g, ' ')} (${pred.twoPhaseMovePrediction?.phase2TrueMacroMove.duration}) - ${pred.twoPhaseMovePrediction?.phase2TrueMacroMove.expectedAction}
+• Action Playbook: ${pred.twoPhaseMovePrediction?.theRightActualMovePlaybook.verdictSummary} (${pred.twoPhaseMovePrediction?.theRightActualMovePlaybook.timingAdvice})
 =====================================================`;
 
     navigator.clipboard.writeText(text);
@@ -220,7 +199,6 @@ Expected Action: ${pred.finalPrediction.expectedPriceAction}
     setTimeout(() => setCopiedId(null), 2500);
   };
 
-  // Concise audio briefing without SL/TP
   const handleSpeakPrediction = (pred: EconomicNewsPrediction) => {
     if (speakingId === pred.id) {
       window.speechSynthesis?.cancel();
@@ -229,7 +207,7 @@ Expected Action: ${pred.finalPrediction.expectedPriceAction}
     }
 
     const localTime = formatToLocalTime(pred.eventTime);
-    const script = `Live economic prediction for ${pred.title}. Release is in ${pred.countdownFormatted}, at ${localTime.timeStr} local time. Consensus expectation is ${pred.newsPrediction.consensusValue}. In the live market for ${currentSymbol}, the model observes that ${pred.modelMarketObservations.orderFlowState}. Final prediction verdict: ${pred.finalPrediction.verdictCall}, with ${pred.finalPrediction.confidenceScore} percent confidence. Expected price path: ${pred.finalPrediction.expectedPriceAction}.`;
+    const script = `Macro intelligence for ${pred.title}. Scheduled in ${pred.countdownFormatted}, at ${localTime.timeStr} local time. Consensus is ${pred.newsPrediction.consensusValue}. Order flow indicates ${pred.modelMarketObservations.orderFlowState}. Model forecast: ${pred.finalPrediction.verdictCall}, with ${pred.finalPrediction.confidenceScore} percent confidence. Expecting ${pred.finalPrediction.expectedPriceAction}.`;
 
     setSpeakingId(pred.id);
     tradingVoice.speak(script, { force: true, priority: true });
@@ -244,740 +222,511 @@ Expected Action: ${pred.finalPrediction.expectedPriceAction}
     onAddNoteToAnalysis({
       id: pred.id,
       symbol: currentSymbol,
-      title: `${pred.category} Prediction: ${pred.finalPrediction.verdictCall}`,
+      title: `${pred.category}: ${pred.finalPrediction.verdictCall}`,
       type: 'NEWS_CATALYST',
-      detail: `Consensus: ${pred.newsPrediction.consensusValue} (Local: ${localTime.fullLocalDisplay}). Model observes: ${pred.modelMarketObservations.orderFlowState}. Final call: ${pred.finalPrediction.verdictCall} (${pred.finalPrediction.confidenceScore}% confidence). Expected: ${pred.finalPrediction.expectedPriceAction}`,
+      detail: `Consensus: ${pred.newsPrediction.consensusValue} (${localTime.timeStr}). Bias: ${pred.finalPrediction.directionalBias} (${pred.finalPrediction.confidenceScore}%). ${pred.finalPrediction.expectedPriceAction}`,
       impact: pred.impact === 'CRITICAL' ? 'HIGH' : pred.impact,
       sentiment: pred.finalPrediction.directionalBias.includes('BULLISH') ? 'BULLISH' : 'BEARISH',
       addedAt: Date.now(),
     });
   };
 
-
-
-  const imminentEvent = predictions[0];
-  const imminentLocalTime = imminentEvent ? formatToLocalTime(imminentEvent.eventTime) : null;
-
   return (
-    <div className="bg-slate-950/95 border border-slate-800/90 rounded-xl overflow-hidden shadow-2xl backdrop-blur-md">
-      {/* Header Bar */}
-      <div className="p-4 sm:p-5 bg-gradient-to-r from-slate-900 via-slate-900/90 to-indigo-950/40 border-b border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2.5 flex-wrap">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 text-xs font-mono font-semibold uppercase tracking-wider">
-              <Flame className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-              Live Upcoming Macro News
-            </span>
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-[11px] font-mono">
-              <Sparkles className="w-3 h-3 text-emerald-400" />
-              Predictions Only (No SL/TP)
-            </span>
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[11px] font-mono">
-              <Globe className="w-3 h-3 text-sky-400" />
-              Local Time: {userTimeZone || 'Detected'} ({userLocalClock || 'Live'})
-            </span>
+    <div className="bg-[#0b0f19] border border-[#1b253b] rounded-xl overflow-hidden shadow-2xl">
+      {/* Sleek Terminal Header */}
+      <div className="px-4 py-3 bg-[#0d1424] border-b border-[#1b253b] flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Radio className="w-4 h-4 text-emerald-400 animate-pulse" />
+            <h2 className="text-sm font-bold text-white tracking-wide uppercase font-mono flex items-center gap-2">
+              Economic Catalysts & Macro Playbook
+              <span className="text-[11px] px-2 py-0.5 rounded bg-[#162035] text-cyan-300 font-mono font-medium border border-cyan-800/40">
+                {currentSymbol}
+              </span>
+            </h2>
           </div>
-          <h2 className="text-lg sm:text-xl font-bold text-white mt-1.5 flex items-center gap-2">
-            Institutional News & Event Predictions
-            <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono font-normal">
-              {currentSymbol}
-            </span>
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5 max-w-2xl">
-            Real upcoming economic catalysts sequenced by release time, automatically converted to your local timezone. Compact view by default: click any news card to expand full institutional synthesis.
-          </p>
-        </div>
 
-        {/* Live Controls */}
-        <div className="flex items-center gap-2 self-start md:self-center">
-          <div className="text-right text-[11px] font-mono text-slate-400 hidden sm:block">
-            <span className="text-slate-500">Feed Sync:</span> {lastSyncTime}
+          <div className="hidden lg:flex items-center gap-1.5 text-[11px] font-mono text-slate-400 bg-[#080d18] px-2.5 py-1 rounded-md border border-[#162137]">
+            <Globe className="w-3 h-3 text-sky-400" />
+            <span className="text-slate-300">{userLocalClock || '--:--'}</span>
+            <span className="text-slate-500">({userTimeZone ? userTimeZone.split('/').pop()?.replace(/_/g, ' ') : 'Local'})</span>
           </div>
-          <button
-            onClick={fetchLiveCalendar}
-            disabled={isRefreshing}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 text-xs text-slate-200 transition-colors disabled:opacity-50"
-            title="Refresh upcoming releases"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-amber-400' : 'text-slate-400'}`} />
-            Sync Feed
-          </button>
-        </div>
-      </div>
-
-      {/* Main View Mode Selector & Local Time Indicator */}
-      <div className="px-4 py-2.5 bg-slate-900/60 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setActiveTab('UPCOMING')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === 'UPCOMING'
-                ? 'bg-amber-500/20 text-amber-200 border border-amber-500/40 shadow-sm'
-                : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
-            }`}
-          >
-            <Flame className="w-3.5 h-3.5 text-amber-400" />
-            🔥 Next Upcoming Releases ({predictions.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('RECENTLY_RELEASED')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === 'RECENTLY_RELEASED'
-                ? 'bg-blue-500/20 text-blue-200 border border-blue-500/40 shadow-sm'
-                : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
-            }`}
-          >
-            <History className="w-3.5 h-3.5 text-blue-400" />
-            ✓ Recently Released Past Actuals ({releasedEvents.length})
-          </button>
         </div>
 
-        {/* Search Input & Expand/Collapse All Button */}
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        {/* Tab & Controls */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center bg-[#070b14] p-0.5 rounded-lg border border-[#1a243a]">
+            <button
+              onClick={() => setActiveTab('UPCOMING')}
+              className={`px-3 py-1 rounded-md text-xs font-mono font-medium transition-colors ${
+                activeTab === 'UPCOMING'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Upcoming ({predictions.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('HISTORY')}
+              className={`px-3 py-1 rounded-md text-xs font-mono font-medium transition-colors ${
+                activeTab === 'HISTORY'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Archive & Post-Mortem
+            </button>
+          </div>
+
           {activeTab === 'UPCOMING' && (
             <button
               onClick={handleToggleExpandAll}
-              className="flex items-center gap-1.5 px-3 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 rounded-lg text-xs font-mono text-slate-300 transition-colors whitespace-nowrap"
-              title={areAllExpanded ? 'Collapse all prediction cards to save space' : 'Expand all prediction cards'}
+              className="text-xs font-mono px-2.5 py-1 rounded-md bg-[#131b2e] hover:bg-[#19243d] text-slate-300 border border-[#202c48] transition-colors"
+              title={areAllExpanded ? 'Collapse All Cards' : 'Expand All Cards'}
             >
-              {areAllExpanded ? (
-                <>
-                  <Minimize2 className="w-3.5 h-3.5 text-amber-400" />
-                  Collapse All
-                </>
-              ) : (
-                <>
-                  <Maximize2 className="w-3.5 h-3.5 text-indigo-400" />
-                  Expand All
-                </>
-              )}
+              {areAllExpanded ? 'Compact All' : 'Expand All'}
             </button>
           )}
 
-          <div className="relative w-full sm:w-56">
-            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <div className="relative">
+            <Search className="w-3 h-3 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Search catalyst..."
+              placeholder="Filter..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+              className="w-28 sm:w-36 bg-[#080d18] border border-[#1b253b] rounded-md pl-7 pr-2 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono"
             />
           </div>
+
+          <button
+            onClick={fetchLiveCalendar}
+            disabled={isRefreshing}
+            className="p-1.5 rounded-md bg-[#131b2e] hover:bg-[#19243d] border border-[#202c48] text-slate-300 transition-colors disabled:opacity-50"
+            title={`Last sync: ${lastSyncTime}`}
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-amber-400' : 'text-slate-400'}`} />
+          </button>
         </div>
       </div>
 
       {activeTab === 'UPCOMING' ? (
-        <>
-          {/* Imminent News Banner with Local Time */}
-          {imminentEvent && (
-            <div className="px-4 py-3 bg-gradient-to-r from-amber-950/30 via-slate-900 to-indigo-950/20 border-b border-amber-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-400 flex-shrink-0">
-                  <Flame className="w-5 h-5 animate-bounce" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[11px] font-mono font-bold text-amber-400 uppercase tracking-wide">
-                      Next Live Catalyst Arriving
-                    </span>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 font-mono font-bold">
-                      {imminentEvent.countdownFormatted}
-                    </span>
-                    <span className="text-xs text-sky-300 font-mono flex items-center gap-1 bg-sky-950/60 border border-sky-800/50 px-2 py-0.5 rounded">
-                      <Clock className="w-3 h-3 text-sky-400" />
-                      {imminentLocalTime?.fullLocalDisplay}
-                    </span>
-                  </div>
-                  <div className="text-sm font-semibold text-slate-100 mt-1">
-                    {imminentEvent.title} — Expected: <span className="text-amber-300 font-mono">{imminentEvent.newsPrediction.consensusValue}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 self-end sm:self-center">
-                <span className="text-xs font-mono font-bold px-3 py-1 rounded-lg bg-indigo-950/80 border border-indigo-700/50 text-indigo-300">
-                  Call: {imminentEvent.finalPrediction.directionalBias.replace(/_/g, ' ')} ({imminentEvent.finalPrediction.confidenceScore}%)
-                </span>
-              </div>
+        <div className="p-3.5 space-y-2.5">
+          {filteredPredictions.length === 0 ? (
+            <div className="text-center py-10 text-slate-500 font-mono text-xs bg-[#080d18] rounded-lg border border-dashed border-[#1b253b]">
+              No upcoming catalysts found matching &ldquo;{searchQuery}&rdquo;.
             </div>
-          )}
+          ) : (
+            filteredPredictions.map((pred, index) => {
+              const isFirst = index === 0;
+              const isExpanded = Boolean(expandedCardIds[pred.id]);
+              const localTime = formatToLocalTime(pred.eventTime);
+              const isSelectedNote = selectedAnalysisNotes.some((n) => n.id === pred.id);
+              const isBullish = pred.finalPrediction.directionalBias.includes('BULL');
+              const isBearish = pred.finalPrediction.directionalBias.includes('BEAR');
 
-          {/* Strip with only ALL UPCOMING displayed (all other category chips removed) */}
-          <div className="px-4 py-2 bg-slate-950/80 border-b border-slate-800/60 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-600/25 text-indigo-200 border border-indigo-500/40 text-xs font-mono font-semibold shadow-sm">
-                <Flame className="w-3.5 h-3.5 text-amber-400" />
-                ALL UPCOMING
-                <span className="px-1.5 py-0.2 rounded-full bg-indigo-500/40 text-white text-[10px] font-bold">
-                  {predictions.length}
-                </span>
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-400 whitespace-nowrap pl-2">
-              <span className="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
-              Click any card to expand details
-            </div>
-          </div>
-
-          {/* Prediction Cards Grid - Compact by default, click to expand */}
-          <div className="p-4 sm:p-5 space-y-3">
-            {/* Dedicated Passed PPI Print & Retrospective Error Analysis Card */}
-            <div className="rounded-xl border border-emerald-500/40 bg-gradient-to-r from-emerald-950/30 via-slate-900 to-indigo-950/30 overflow-hidden shadow-lg">
-              <div 
-                onClick={() => setIsPpiRetrospectiveOpen(!isPpiRetrospectiveOpen)}
-                className="p-3.5 sm:p-4 cursor-pointer select-none flex items-center justify-between gap-3 border-b border-emerald-500/20"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap mb-1">
-                    <span className="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                      NEWS PASSED & PRINTED (ACTUAL VALUE UPDATED)
-                    </span>
-                    <span className="text-xs px-2.5 py-0.5 rounded bg-emerald-400/20 text-emerald-200 font-mono font-bold">
-                      Actual: {PPI_POST_RELEASE_RETROSPECTIVE.actualPrintedValue}
-                    </span>
-                    <span className="text-[11px] font-mono text-slate-400">
-                      (Forecast: {PPI_POST_RELEASE_RETROSPECTIVE.forecastValue} · Prior: {PPI_POST_RELEASE_RETROSPECTIVE.previousValue})
-                    </span>
-                  </div>
-                  <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-                    {PPI_POST_RELEASE_RETROSPECTIVE.title} — Market Post-Mortem & Error Rectification
-                  </h3>
-                  <p className="text-xs text-slate-300 mt-0.5">
-                    Observation: Price dropped first (Phase 1 Bearish Stop-Hunt) before exploding upward (Phase 2 Bullish Macro Expansion). See model error analysis and how upcoming news is rectified below.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-950/50 text-emerald-300 text-xs font-mono font-semibold flex-shrink-0">
-                  <span>{isPpiRetrospectiveOpen ? 'Hide Analysis' : 'Inspect Analysis'}</span>
-                  {isPpiRetrospectiveOpen ? <ChevronUp className="w-3.5 h-3.5 text-emerald-400" /> : <ChevronDown className="w-3.5 h-3.5 text-emerald-400" />}
-                </div>
-              </div>
-
-              {isPpiRetrospectiveOpen && (
-                <div className="p-4 bg-slate-950/80 space-y-3.5 text-xs">
-                  {/* Two-Phase Sequence of What Actually Happened */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 font-mono">
-                    {/* Phase 1 What Happened */}
-                    <div className="p-3 rounded-lg bg-rose-950/30 border border-rose-800/40">
-                      <div className="flex items-center justify-between text-rose-300 font-bold mb-1.5">
-                        <span className="flex items-center gap-1.5">
-                          <ArrowDownRight className="w-4 h-4 text-rose-400" />
-                          Phase 1: Initial Impact (0 - 90 Seconds)
-                        </span>
-                        <span className="px-2 py-0.5 rounded bg-rose-900/40 text-rose-200 text-[10px]">
-                          {PPI_POST_RELEASE_RETROSPECTIVE.marketOutcome.firstImpactPhase1.priceMove}
-                        </span>
-                      </div>
-                      <div className="text-slate-300 font-sans text-[11px] leading-relaxed">
-                        {PPI_POST_RELEASE_RETROSPECTIVE.marketOutcome.firstImpactPhase1.mechanism}
-                      </div>
-                    </div>
-
-                    {/* Phase 2 What Happened */}
-                    <div className="p-3 rounded-lg bg-emerald-950/30 border border-emerald-800/40">
-                      <div className="flex items-center justify-between text-emerald-300 font-bold mb-1.5">
-                        <span className="flex items-center gap-1.5">
-                          <ArrowUpRight className="w-4 h-4 text-emerald-400" />
-                          Phase 2: True Macro Move (2 - 35+ Minutes)
-                        </span>
-                        <span className="px-2 py-0.5 rounded bg-emerald-900/40 text-emerald-200 text-[10px]">
-                          {PPI_POST_RELEASE_RETROSPECTIVE.marketOutcome.secondImpactPhase2.priceMove}
-                        </span>
-                      </div>
-                      <div className="text-slate-300 font-sans text-[11px] leading-relaxed">
-                        {PPI_POST_RELEASE_RETROSPECTIVE.marketOutcome.secondImpactPhase2.mechanism}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Honest Model Error Post-Mortem */}
-                  <div className="p-3.5 rounded-lg bg-amber-950/20 border border-amber-500/30">
-                    <div className="flex items-center gap-2 text-amber-300 font-mono font-bold mb-1">
-                      <AlertTriangle className="w-4 h-4 text-amber-400" />
-                      Model Mistake Analysis: Why Did It First Go Down When The News Was Bullish?
-                    </div>
-                    <div className="text-slate-300 font-sans leading-relaxed text-[11px]">
-                      {PPI_POST_RELEASE_RETROSPECTIVE.mistakePostMortem.whyPriorCallWasIncomplete}
-                    </div>
-                    <div className="mt-2 pt-2 border-t border-amber-500/20 flex items-start gap-2 text-[11px] text-amber-200 font-mono">
-                      <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <strong>Rectification Implemented on Upcoming News:</strong> {PPI_POST_RELEASE_RETROSPECTIVE.mistakePostMortem.lessonAndRectification}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {filteredPredictions.length === 0 ? (
-              <div className="text-center py-12 text-slate-500 font-mono text-sm bg-slate-900/40 rounded-xl border border-dashed border-slate-800">
-                No upcoming catalysts matched the search criteria.
-              </div>
-            ) : (
-              filteredPredictions.map((pred, index) => {
-                const isSelectedNote = selectedAnalysisNotes.some((n) => n.id === pred.id);
-                const isFirst = index === 0;
-                const isExpanded = Boolean(expandedCardIds[pred.id]);
-                const localTime = formatToLocalTime(pred.eventTime);
-
-                return (
+              return (
+                <div
+                  key={pred.id}
+                  className={`rounded-lg border transition-all duration-150 overflow-hidden ${
+                    isExpanded
+                      ? 'bg-[#0f172a] border-indigo-500/60 shadow-lg ring-1 ring-indigo-500/20'
+                      : isFirst
+                      ? 'bg-[#0d1424] border-amber-500/40 hover:border-amber-400/60'
+                      : 'bg-[#0a0f1d] border-[#182338] hover:border-[#22314e]'
+                  }`}
+                >
+                  {/* Compact Header Bar */}
                   <div
-                    key={pred.id}
-                    className={`rounded-xl border transition-all duration-200 overflow-hidden shadow-md ${
-                      isExpanded
-                        ? 'bg-slate-900/95 border-indigo-500/50 ring-1 ring-indigo-500/20'
-                        : isFirst
-                        ? 'bg-slate-900/80 border-amber-500/40 hover:border-amber-400/70 hover:bg-slate-900/90'
-                        : 'bg-slate-900/60 border-slate-800/90 hover:border-slate-700 hover:bg-slate-900/80'
-                    }`}
+                    onClick={() => toggleCard(pred.id)}
+                    className="p-3 cursor-pointer select-none flex flex-col md:flex-row md:items-center justify-between gap-2.5"
                   >
-                    {/* Collapsed / Header Summary View */}
-                    <div 
-                      onClick={() => toggleCard(pred.id)}
-                      className="p-3.5 sm:p-4 cursor-pointer select-none transition-colors"
-                    >
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                        {/* Left Info: Countdown, Local Time, Category, Impact */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap mb-1.5">
-                            <span className={`px-2.5 py-0.5 rounded text-xs font-mono font-bold flex items-center gap-1.5 ${
-                              isFirst
-                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                : 'bg-slate-800 text-slate-300 border border-slate-700'
-                            }`}>
-                              <Clock className="w-3.5 h-3.5" />
-                              {pred.countdownFormatted}
-                            </span>
+                    {/* Left: Timing & Event Title */}
+                    <div className="flex items-center gap-2.5 flex-wrap flex-1 min-w-0">
+                      {/* Countdown Badge */}
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-bold tracking-tight ${
+                          isFirst
+                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                            : 'bg-slate-800/80 text-slate-300 border border-slate-700'
+                        }`}
+                      >
+                        <Clock className="w-3 h-3" />
+                        {pred.countdownFormatted}
+                      </span>
 
-                            {/* Local Time Badge */}
-                            <span className="text-xs text-sky-300 font-mono flex items-center gap-1 bg-sky-950/60 border border-sky-800/50 px-2 py-0.5 rounded">
-                              <Globe className="w-3 h-3 text-sky-400" />
-                              {localTime.fullLocalDisplay}
-                            </span>
+                      {/* Local Clock Badge */}
+                      <span className="text-[11px] font-mono text-sky-400 bg-sky-950/40 border border-sky-800/30 px-2 py-0.5 rounded">
+                        {localTime.timeStr}
+                      </span>
 
-                            <span className="text-xs px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-mono font-semibold">
-                              {pred.category}
-                            </span>
+                      {/* Event Title */}
+                      <span className="text-xs sm:text-sm font-bold text-white tracking-wide">
+                        {pred.title}
+                      </span>
 
-                            {pred.isVerifiedFromLiveFeed && (
-                              <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">
-                                ✓ LIVE CALENDAR
-                              </span>
-                            )}
+                      {/* Impact Tag */}
+                      <span
+                        className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded uppercase ${
+                          pred.impact === 'CRITICAL'
+                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                            : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                        }`}
+                      >
+                        {pred.impact}
+                      </span>
 
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-rose-500/10 text-rose-300 border border-rose-500/20 font-mono uppercase">
-                              {pred.impact} IMPACT
-                            </span>
-                          </div>
-
-                          <div className="flex flex-col sm:flex-row sm:items-baseline gap-1.5 sm:gap-3">
-                            <h3 className="text-sm sm:text-base font-bold text-white truncate">
-                              {pred.title}
-                            </h3>
-                            <span className="text-xs text-slate-400 font-mono truncate">
-                              Expected: <strong className="text-amber-300">{pred.newsPrediction.consensusValue}</strong> (Prior: {pred.newsPrediction.previousValue})
-                            </span>
-                          </div>
-
-                          {/* Quick summary line when collapsed with 2-Phase Sequence */}
-                          {!isExpanded && (
-                            <div className="mt-2 space-y-1.5 text-xs">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-mono font-bold text-emerald-400 bg-emerald-950/40 border border-emerald-800/40 px-2 py-0.5 rounded">
-                                  {pred.finalPrediction.verdictCall}
-                                </span>
-                                <span className="text-slate-400 font-mono text-[11px]">
-                                  Conviction: <strong className="text-white">{pred.finalPrediction.confidenceScore}%</strong>
-                                </span>
-                              </div>
-
-                              {pred.twoPhaseMovePrediction && (
-                                <div className="flex items-center gap-2 flex-wrap font-mono text-[11px]">
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-rose-950/40 text-rose-300 border border-rose-800/40">
-                                    <ArrowDownRight className="w-3 h-3 text-rose-400" />
-                                    Phase 1: {pred.twoPhaseMovePrediction.phase1KneeJerk.direction.replace(/_/g, ' ')} ({pred.twoPhaseMovePrediction.phase1KneeJerk.duration})
-                                  </span>
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/40 text-emerald-300 border border-emerald-800/40">
-                                    <ArrowUpRight className="w-3 h-3 text-emerald-400" />
-                                    Phase 2: {pred.twoPhaseMovePrediction.phase2TrueMacroMove.direction.replace(/_/g, ' ')} ({pred.twoPhaseMovePrediction.phase2TrueMacroMove.duration})
-                                  </span>
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 font-bold">
-                                    🎯 {pred.twoPhaseMovePrediction.theRightActualMovePlaybook.verdictSummary}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Right Actions & Expand Indicator */}
-                        <div className="flex items-center gap-2 self-start md:self-center flex-shrink-0 pt-1 md:pt-0">
-                          {/* Speak & Copy Buttons (stop propagation so card doesn't expand on click) */}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleSpeakPrediction(pred);
-                            }}
-                            className={`p-1.5 rounded-lg border text-xs transition-colors flex items-center gap-1 ${
-                              speakingId === pred.id
-                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                                : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 border-slate-700'
-                            }`}
-                            title="Listen to audio briefing"
-                          >
-                            <Volume2 className={`w-3.5 h-3.5 ${speakingId === pred.id ? 'animate-pulse text-amber-400' : ''}`} />
-                          </button>
-
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCopyPrediction(pred);
-                            }}
-                            className="p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs transition-colors"
-                            title="Copy prediction summary"
-                          >
-                            {copiedId === pred.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                          </button>
-
-                          {onAddNoteToAnalysis && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleAddPredictionToNotes(pred);
-                              }}
-                              className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-colors flex items-center gap-1 ${
-                                isSelectedNote
-                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                                  : 'bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700'
-                              }`}
-                            >
-                              {isSelectedNote ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Sparkles className="w-3.5 h-3.5 text-indigo-400" />}
-                              <span className="hidden sm:inline">{isSelectedNote ? 'In Thesis' : '+ Note'}</span>
-                            </button>
-                          )}
-
-                          {/* Expand/Collapse Toggle Button */}
-                          <div 
-                            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg border text-xs font-mono font-semibold transition-all ${
-                              isExpanded
-                                ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/40'
-                                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-                            }`}
-                          >
-                            <span>{isExpanded ? 'Collapse' : 'Expand'}</span>
-                            {isExpanded ? (
-                              <ChevronUp className="w-3.5 h-3.5 text-indigo-400" />
-                            ) : (
-                              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-                            )}
-                          </div>
-                        </div>
-                      </div>
+                      {/* Key Benchmark Pill */}
+                      <span className="text-[11px] font-mono text-slate-400 hidden sm:inline">
+                        Exp: <strong className="text-amber-300">{pred.newsPrediction.consensusValue}</strong> (Prev: {pred.newsPrediction.previousValue})
+                      </span>
                     </div>
 
-                    {/* EXPANDED CONTENT: 5-Step Deep Institutional Breakdown */}
-                    {isExpanded && (
-                      <div className="border-t border-slate-800/80 bg-slate-950/50 p-4 sm:p-5 space-y-4 animate-in fade-in duration-200 text-xs">
-                        <div className="text-slate-400 text-xs pb-1 border-b border-slate-800/60 flex items-center justify-between">
-                          <span>
-                            Affects: <strong className="text-slate-200">{pred.affectedInstruments.join(', ')}</strong>
-                          </span>
-                          <span className="font-mono text-[11px] text-sky-400 flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            Local Release: {localTime.fullLocalDisplay}
-                          </span>
-                        </div>
+                    {/* Right: Model Bias & Quick Actions */}
+                    <div className="flex items-center gap-2 self-end md:self-center flex-shrink-0">
+                      {/* Directional Bias Pill */}
+                      <div
+                        className={`px-2.5 py-1 rounded text-xs font-mono font-bold flex items-center gap-1.5 border ${
+                          isBullish
+                            ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/50'
+                            : isBearish
+                            ? 'bg-rose-950/60 text-rose-300 border-rose-700/50'
+                            : 'bg-indigo-950/60 text-indigo-300 border-indigo-700/50'
+                        }`}
+                      >
+                        {isBullish ? <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> : <TrendingDown className="w-3.5 h-3.5 text-rose-400" />}
+                        <span>{pred.finalPrediction.verdictCall}</span>
+                        <span className="text-[10px] text-slate-400">({pred.finalPrediction.confidenceScore}%)</span>
+                      </div>
 
-                        {/* Step 1: News Consensus */}
-                        <div className="bg-slate-950/70 rounded-lg p-3.5 border border-slate-800/80">
-                          <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800/60">
-                            <span className="font-mono font-bold text-amber-400 flex items-center gap-1.5 uppercase tracking-wide">
-                              <Target className="w-3.5 h-3.5" />
-                              1. News Prediction & Consensus
-                            </span>
-                            <span className="text-[11px] font-mono text-slate-400">
-                              Forecast vs Prior
-                            </span>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-300">
-                            <div>
-                              <span className="text-slate-500">Consensus Expectation:</span>{' '}
-                              <span className="font-mono font-semibold text-white">{pred.newsPrediction.consensusValue}</span>{' '}
-                              <span className="text-slate-500">(Prior: {pred.newsPrediction.previousValue})</span>
-                            </div>
-                            <div>
-                              <span className="text-slate-500">Desk Whisper:</span>{' '}
-                              <span className="font-mono text-indigo-300">{pred.newsPrediction.whisperNumber}</span>
-                            </div>
-                            <div className="sm:col-span-2 text-slate-400 mt-0.5">
-                              <span className="text-slate-500">Bank Consensus:</span> {pred.newsPrediction.bankConsensusRange}
-                            </div>
-                          </div>
-                        </div>
+                      {/* Audio Briefing */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSpeakPrediction(pred);
+                        }}
+                        className={`p-1.5 rounded border text-xs transition-colors ${
+                          speakingId === pred.id
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                            : 'bg-[#121a2c] hover:bg-[#19243c] text-slate-300 border-[#202c46]'
+                        }`}
+                        title="Listen to briefing"
+                      >
+                        <Volume2 className={`w-3.5 h-3.5 ${speakingId === pred.id ? 'animate-pulse text-amber-400' : ''}`} />
+                      </button>
 
-                        {/* Step 2: Why That Prediction */}
-                        <div className="bg-slate-950/70 rounded-lg p-3.5 border border-slate-800/80">
-                          <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800/60">
-                            <span className="font-mono font-bold text-blue-400 flex items-center gap-1.5 uppercase tracking-wide">
-                              <Scale className="w-3.5 h-3.5" />
-                              2. Why That Prediction (Macro Drivers)
-                            </span>
-                          </div>
-                          <ul className="space-y-1.5 text-slate-300">
-                            {pred.whyPrediction.primaryDrivers.map((driver, idx) => (
-                              <li key={idx} className="flex items-start gap-2">
-                                <span className="text-blue-400 mt-0.5 font-bold">•</span>
-                                <span>{driver}</span>
-                              </li>
-                            ))}
-                            <li className="flex items-start gap-2 pt-1 border-t border-slate-900 text-slate-400">
-                              <span className="text-cyan-400 mt-0.5 font-bold">↳</span>
-                              <span><strong className="text-slate-300">Leading Indicator:</strong> {pred.whyPrediction.leadingIndicatorSignals}</span>
-                            </li>
-                          </ul>
-                        </div>
+                      {/* Copy Summary */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCopyPrediction(pred);
+                        }}
+                        className="p-1.5 rounded bg-[#121a2c] hover:bg-[#19243c] border border-[#202c46] text-slate-300 text-xs transition-colors"
+                        title="Copy report"
+                      >
+                        {copiedId === pred.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
 
-                        {/* Step 3: What the Model is Seeing */}
-                        <div className="bg-slate-950/70 rounded-lg p-3.5 border border-slate-800/80">
-                          <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800/60">
-                            <span className="font-mono font-bold text-emerald-400 flex items-center gap-1.5 uppercase tracking-wide">
-                              <Activity className="w-3.5 h-3.5" />
-                              3. What the Model is Seeing in the Market ({currentSymbol})
-                            </span>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-300">
-                            <div>
-                              <span className="text-slate-500">Order Flow:</span> {pred.modelMarketObservations.orderFlowState}
-                            </div>
-                            <div>
-                              <span className="text-slate-500">Delta / CVD:</span> {pred.modelMarketObservations.cvdDeltaState}
-                            </div>
-                            <div className="sm:col-span-2">
-                              <span className="text-slate-500">Resting Liquidity:</span> {pred.modelMarketObservations.restingLiquidity}
-                            </div>
-                            <div className="sm:col-span-2 text-slate-400">
-                              <span className="text-slate-500">Value Profile:</span> {pred.modelMarketObservations.valueAreaPositioning}
-                            </div>
-                          </div>
-                        </div>
+                      {/* Add to Thesis Note */}
+                      {onAddNoteToAnalysis && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddPredictionToNotes(pred);
+                          }}
+                          className={`px-2 py-1 rounded text-xs font-mono transition-colors flex items-center gap-1 border ${
+                            isSelectedNote
+                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                              : 'bg-[#121a2c] hover:bg-[#19243c] text-slate-300 border-[#202c46]'
+                          }`}
+                          title="Add to market thesis notes"
+                        >
+                          {isSelectedNote ? <CheckCircle2 className="w-3 h-3 text-emerald-400" /> : <Sparkles className="w-3 h-3 text-indigo-400" />}
+                          <span className="hidden sm:inline">{isSelectedNote ? 'In Note' : '+ Note'}</span>
+                        </button>
+                      )}
 
-                        {/* Step 4: Assessment with News Prediction */}
-                        <div className="bg-slate-950/70 rounded-lg p-3.5 border border-slate-800/80">
-                          <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800/60">
-                            <span className="font-mono font-bold text-purple-400 flex items-center gap-1.5 uppercase tracking-wide">
-                              <Layers className="w-3.5 h-3.5" />
-                              4. Assessment vs News Prediction
-                            </span>
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono">
-                              {pred.assessmentWithNews.pricingStatus.replace(/_/g, ' ')}
-                            </span>
-                          </div>
-                          <p className="text-slate-300 mb-2">
-                            {pred.assessmentWithNews.pricingExplanation}
-                          </p>
-                          <div className="flex items-start gap-2 p-2 rounded bg-amber-500/10 border border-amber-500/20 text-amber-200 text-[11px] mb-3">
-                            <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-                            <span><strong>Trap Warning:</strong> {pred.assessmentWithNews.trapWarning}</span>
-                          </div>
+                      {/* Chevron */}
+                      <div className="text-slate-400 pl-1">
+                        {isExpanded ? <ChevronUp className="w-4 h-4 text-indigo-400" /> : <ChevronDown className="w-4 h-4" />}
+                      </div>
+                    </div>
+                  </div>
 
-                          {/* 3-Way Scenario Matrix */}
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
-                            <div className="p-2 rounded bg-rose-950/30 border border-rose-800/40">
-                              <div className="font-mono font-bold text-rose-300 mb-0.5">Hot Scenario</div>
-                              <div className="text-slate-400 text-[10px] mb-1">{pred.assessmentWithNews.scenarioMatrix.hot.trigger}</div>
-                              <div className="text-slate-200">{pred.assessmentWithNews.scenarioMatrix.hot.reaction}</div>
-                            </div>
-                            <div className="p-2 rounded bg-blue-950/30 border border-blue-800/40">
-                              <div className="font-mono font-bold text-blue-300 mb-0.5">In-Line Scenario</div>
-                              <div className="text-slate-400 text-[10px] mb-1">{pred.assessmentWithNews.scenarioMatrix.inLine.trigger}</div>
-                              <div className="text-slate-200">{pred.assessmentWithNews.scenarioMatrix.inLine.reaction}</div>
-                            </div>
-                            <div className="p-2 rounded bg-emerald-950/30 border border-emerald-800/40">
-                              <div className="font-mono font-bold text-emerald-300 mb-0.5">Cool Scenario</div>
-                              <div className="text-slate-400 text-[10px] mb-1">{pred.assessmentWithNews.scenarioMatrix.cool.trigger}</div>
-                              <div className="text-slate-200">{pred.assessmentWithNews.scenarioMatrix.cool.reaction}</div>
-                            </div>
-                          </div>
-                        </div>
+                  {/* Summary Bar when Collapsed (Institutional Execution Path) */}
+                  {!isExpanded && pred.twoPhaseMovePrediction && (
+                    <div className="px-3 pb-2.5 pt-0 flex flex-wrap items-center gap-2 text-[11px] font-mono border-t border-[#141d30]/60 mt-1 pt-2">
+                      <span className="text-slate-400 flex items-center gap-1 font-semibold">
+                        2-Phase Path:
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-950/40 text-rose-300 border border-rose-900/40">
+                        <ArrowDownRight className="w-3 h-3 text-rose-400" />
+                        Ph.1 Sweep: {pred.twoPhaseMovePrediction.phase1KneeJerk.direction.replace(/_/g, ' ')} ({pred.twoPhaseMovePrediction.phase1KneeJerk.duration})
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-950/40 text-emerald-300 border border-emerald-900/40">
+                        <ArrowUpRight className="w-3 h-3 text-emerald-400" />
+                        Ph.2 Trend: {pred.twoPhaseMovePrediction.phase2TrueMacroMove.direction.replace(/_/g, ' ')} ({pred.twoPhaseMovePrediction.phase2TrueMacroMove.duration})
+                      </span>
+                      <span className="text-amber-300/90 font-medium ml-auto hidden md:inline">
+                        Playbook: {pred.twoPhaseMovePrediction.theRightActualMovePlaybook.verdictSummary}
+                      </span>
+                    </div>
+                  )}
 
-                        {/* Step 5: Final Prediction (PREDICTIONS ONLY - NO SL, NO TP) */}
-                        <div className="bg-gradient-to-r from-indigo-950/60 via-slate-900 to-indigo-950/60 rounded-xl p-4 border border-indigo-500/40 shadow-inner">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="font-mono font-bold text-emerald-300 flex items-center gap-1.5 uppercase tracking-wide text-xs">
-                              <Zap className="w-4 h-4 text-emerald-400" />
-                              5. Final Prediction (Predictions Only)
-                            </span>
-                            <span className="font-mono text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
-                              Conviction: {pred.finalPrediction.confidenceScore}%
-                            </span>
-                          </div>
-
-                          <div className="text-sm sm:text-base font-bold text-white font-mono bg-slate-950/80 px-3.5 py-2.5 rounded-lg border border-indigo-500/30 mb-2.5 flex items-center justify-between flex-wrap gap-2">
-                            <span>{pred.finalPrediction.verdictCall}</span>
-                            <span className="text-xs px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-normal">
-                              Bias: {pred.finalPrediction.directionalBias.replace(/_/g, ' ')}
-                            </span>
-                          </div>
-
-                          <div className="text-xs text-slate-300 flex items-start gap-2">
-                            <ArrowRight className="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5" />
-                            <div>
-                              <strong className="text-white">Expected Price Sequence:</strong>{' '}
-                              {pred.finalPrediction.expectedPriceAction}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Step 6: Rectified 2-Phase Impact Sequence & The Right Actual Move */}
-                        {pred.twoPhaseMovePrediction && (
-                          <div className="bg-gradient-to-r from-amber-950/40 via-slate-900 to-emerald-950/40 rounded-xl p-4 border border-amber-500/40 shadow-md space-y-3 font-mono">
-                            <div className="flex items-center justify-between pb-2 border-b border-amber-500/30">
-                              <span className="font-bold text-amber-300 flex items-center gap-1.5 uppercase text-xs">
-                                <Sparkles className="w-4 h-4 text-amber-400" />
-                                6. Rectified 2-Phase Move Sequence & Playbook
-                              </span>
-                              <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
-                                RECTIFIED POST-PPI ANALYSIS
+                  {/* EXPANDED VIEW: Clean 3-Column Institutional Synthesis Matrix */}
+                  {isExpanded && (
+                    <div className="p-4 border-t border-[#1e2a44] bg-[#070b14] space-y-3.5 text-xs">
+                      {/* 3 Pillars Grid */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        {/* Pillar 1: Consensus & Macro Drivers */}
+                        <div className="p-3 rounded-lg bg-[#0c1220] border border-[#1b253b] flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between text-amber-400 font-mono font-bold text-[11px] uppercase tracking-wider pb-1.5 border-b border-[#182339] mb-2">
+                              <span className="flex items-center gap-1.5">
+                                <Target className="w-3.5 h-3.5" />
+                                Consensus & Whispers
                               </span>
                             </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                              {/* Phase 1 Initial Impact */}
-                              <div className="p-3 rounded-lg bg-rose-950/30 border border-rose-800/40 space-y-1">
-                                <div className="flex items-center justify-between text-rose-300 font-bold text-[11px]">
-                                  <span className="flex items-center gap-1">
-                                    <ArrowDownRight className="w-3.5 h-3.5 text-rose-400" />
-                                    Phase 1: First Impact ({pred.twoPhaseMovePrediction.phase1KneeJerk.duration})
-                                  </span>
-                                  <span className="px-1.5 py-0.2 rounded bg-rose-900/50 text-rose-200 text-[10px]">
-                                    STOP-HUNT SWEEP
-                                  </span>
-                                </div>
-                                <div className="text-slate-200 font-sans text-[11px]">
-                                  {pred.twoPhaseMovePrediction.phase1KneeJerk.expectedAction}
-                                </div>
-                                <div className="text-amber-300 text-[10px] font-mono pt-1">
-                                  ⚠️ {pred.twoPhaseMovePrediction.phase1KneeJerk.trapWarning}
-                                </div>
+                            <div className="space-y-1.5 font-mono text-[11px]">
+                              <div className="flex justify-between">
+                                <span className="text-slate-400">Consensus:</span>
+                                <span className="text-white font-bold">{pred.newsPrediction.consensusValue}</span>
                               </div>
-
-                              {/* Phase 2 True Directional Move */}
-                              <div className="p-3 rounded-lg bg-emerald-950/30 border border-emerald-800/40 space-y-1">
-                                <div className="flex items-center justify-between text-emerald-300 font-bold text-[11px]">
-                                  <span className="flex items-center gap-1">
-                                    <ArrowUpRight className="w-3.5 h-3.5 text-emerald-400" />
-                                    Phase 2: True Macro Move ({pred.twoPhaseMovePrediction.phase2TrueMacroMove.duration})
-                                  </span>
-                                  <span className="px-1.5 py-0.2 rounded bg-emerald-900/50 text-emerald-200 text-[10px]">
-                                    REAL MOVE
-                                  </span>
-                                </div>
-                                <div className="text-slate-200 font-sans text-[11px]">
-                                  {pred.twoPhaseMovePrediction.phase2TrueMacroMove.expectedAction}
-                                </div>
-                                <div className="text-emerald-300 text-[10px] font-mono pt-1">
-                                  ✓ Catalyst: {pred.twoPhaseMovePrediction.phase2TrueMacroMove.primaryCatalyst}
-                                </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-400">Prior Print:</span>
+                                <span className="text-slate-300">{pred.newsPrediction.previousValue}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-400">Desk Whisper:</span>
+                                <span className="text-indigo-300">{pred.newsPrediction.whisperNumber}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-400">Bank Range:</span>
+                                <span className="text-slate-300 text-right">{pred.newsPrediction.bankConsensusRange}</span>
                               </div>
                             </div>
 
-                            {/* The Right Actual Move Trade Verdict */}
-                            <div className="p-3 rounded-lg bg-slate-950 border border-amber-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="mt-3 pt-2 border-t border-[#182339]">
+                              <span className="text-[10px] uppercase font-mono text-slate-500 font-bold block mb-1">
+                                Macro Drivers:
+                              </span>
+                              <ul className="space-y-1 text-slate-300 text-[11px]">
+                                {pred.whyPrediction.primaryDrivers.map((driver, dIdx) => (
+                                  <li key={dIdx} className="flex items-start gap-1.5">
+                                    <span className="text-cyan-400 font-bold">•</span>
+                                    <span>{driver}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Pillar 2: Order Flow & Liquidity Positioning */}
+                        <div className="p-3 rounded-lg bg-[#0c1220] border border-[#1b253b] flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between text-cyan-400 font-mono font-bold text-[11px] uppercase tracking-wider pb-1.5 border-b border-[#182339] mb-2">
+                              <span className="flex items-center gap-1.5">
+                                <Activity className="w-3.5 h-3.5" />
+                                Market Positioning ({currentSymbol})
+                              </span>
+                            </div>
+                            <div className="space-y-1.5 font-mono text-[11px]">
                               <div>
-                                <div className="text-[10px] text-amber-400 uppercase font-bold tracking-wider">
-                                  The Right Actual Move Playbook (Predictions Only):
+                                <span className="text-slate-400 block text-[10px]">Order Flow:</span>
+                                <span className="text-slate-200">{pred.modelMarketObservations.orderFlowState}</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block text-[10px]">CVD Delta:</span>
+                                <span className="text-slate-200">{pred.modelMarketObservations.cvdDeltaState}</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block text-[10px]">Resting Liquidity:</span>
+                                <span className="text-amber-300">{pred.modelMarketObservations.restingLiquidity}</span>
+                              </div>
+                              <div className="pt-1">
+                                <span className="text-slate-400 block text-[10px]">Pricing Status:</span>
+                                <span className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-950/60 text-indigo-300 border border-indigo-800/40">
+                                  {pred.assessmentWithNews.pricingStatus.replace(/_/g, ' ')}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {pred.assessmentWithNews.trapWarning && (
+                            <div className="mt-2.5 pt-2 border-t border-[#182339] flex items-start gap-1.5 text-[11px] text-amber-300/90">
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+                              <span>{pred.assessmentWithNews.trapWarning}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Pillar 3: 2-Phase Tactical Sequence & Playbook */}
+                        {pred.twoPhaseMovePrediction && (
+                          <div className="p-3 rounded-lg bg-[#0c1220] border border-[#1b253b] flex flex-col justify-between">
+                            <div>
+                              <div className="flex items-center justify-between text-emerald-400 font-mono font-bold text-[11px] uppercase tracking-wider pb-1.5 border-b border-[#182339] mb-2">
+                                <span className="flex items-center gap-1.5">
+                                  <Layers className="w-3.5 h-3.5" />
+                                  2-Phase Tactical Playbook
+                                </span>
+                              </div>
+
+                              <div className="space-y-2">
+                                <div className="p-2 rounded bg-rose-950/30 border border-rose-900/40">
+                                  <div className="text-[10px] font-mono font-bold text-rose-300 uppercase flex items-center justify-between">
+                                    <span>Phase 1 (Sweep)</span>
+                                    <span>{pred.twoPhaseMovePrediction.phase1KneeJerk.duration}</span>
+                                  </div>
+                                  <div className="text-slate-300 text-[11px] mt-0.5">
+                                    {pred.twoPhaseMovePrediction.phase1KneeJerk.expectedAction}
+                                  </div>
                                 </div>
-                                <div className="text-xs sm:text-sm font-bold text-white mt-0.5">
-                                  {pred.twoPhaseMovePrediction.theRightActualMovePlaybook.verdictSummary}
-                                </div>
-                                <div className="text-[11px] text-slate-300 font-sans mt-0.5">
-                                  {pred.twoPhaseMovePrediction.theRightActualMovePlaybook.recommendedExecution}
+
+                                <div className="p-2 rounded bg-emerald-950/30 border border-emerald-900/40">
+                                  <div className="text-[10px] font-mono font-bold text-emerald-300 uppercase flex items-center justify-between">
+                                    <span>Phase 2 (True Move)</span>
+                                    <span>{pred.twoPhaseMovePrediction.phase2TrueMacroMove.duration}</span>
+                                  </div>
+                                  <div className="text-slate-300 text-[11px] mt-0.5">
+                                    {pred.twoPhaseMovePrediction.phase2TrueMacroMove.expectedAction}
+                                  </div>
                                 </div>
                               </div>
-                              <div className="text-right flex-shrink-0">
-                                <span className="inline-block px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[11px] font-mono">
-                                  ⏱️ {pred.twoPhaseMovePrediction.theRightActualMovePlaybook.timingAdvice}
-                                </span>
+                            </div>
+
+                            <div className="mt-2.5 pt-2 border-t border-[#182339] font-mono text-[11px]">
+                              <span className="text-amber-400 font-bold block text-[10px] uppercase">
+                                Action Verdict:
+                              </span>
+                              <span className="text-white font-semibold">
+                                {pred.twoPhaseMovePrediction.theRightActualMovePlaybook.verdictSummary}
+                              </span>
+                              <div className="text-slate-400 text-[10px] mt-0.5">
+                                ⏱️ {pred.twoPhaseMovePrediction.theRightActualMovePlaybook.timingAdvice}
                               </div>
                             </div>
                           </div>
                         )}
-
-                        {/* Collapse Details Button at bottom of expanded card */}
-                        <div className="pt-2 text-center">
-                          <button
-                            onClick={() => toggleCard(pred.id)}
-                            className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-xs font-mono text-slate-400 hover:text-slate-200 transition-colors"
-                          >
-                            <ChevronUp className="w-3.5 h-3.5 text-indigo-400" />
-                            Collapse details to compact view
-                          </button>
-                        </div>
                       </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </>
+
+                      {/* Scenario Sensitivity Matrix (Hot vs In-Line vs Cool) */}
+                      {pred.assessmentWithNews.scenarioMatrix && (
+                        <div className="p-2.5 rounded-lg bg-[#090e1a] border border-[#172136]">
+                          <div className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-2">
+                            Scenario Sensitivity Matrix
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+                            <div className="p-2 rounded bg-rose-950/20 border border-rose-900/30">
+                              <span className="text-rose-400 font-mono font-bold block text-[10px]">HOT PRINT</span>
+                              <span className="text-slate-400 text-[10px] block">{pred.assessmentWithNews.scenarioMatrix.hot.trigger}</span>
+                              <span className="text-slate-200 mt-0.5 block">{pred.assessmentWithNews.scenarioMatrix.hot.reaction}</span>
+                            </div>
+                            <div className="p-2 rounded bg-indigo-950/20 border border-indigo-900/30">
+                              <span className="text-indigo-300 font-mono font-bold block text-[10px]">IN-LINE PRINT</span>
+                              <span className="text-slate-400 text-[10px] block">{pred.assessmentWithNews.scenarioMatrix.inLine.trigger}</span>
+                              <span className="text-slate-200 mt-0.5 block">{pred.assessmentWithNews.scenarioMatrix.inLine.reaction}</span>
+                            </div>
+                            <div className="p-2 rounded bg-emerald-950/20 border border-emerald-900/30">
+                              <span className="text-emerald-400 font-mono font-bold block text-[10px]">COOL PRINT</span>
+                              <span className="text-slate-400 text-[10px] block">{pred.assessmentWithNews.scenarioMatrix.cool.trigger}</span>
+                              <span className="text-slate-200 mt-0.5 block">{pred.assessmentWithNews.scenarioMatrix.cool.reaction}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
       ) : (
-        /* Recently Released News & Past Actuals Table with Local Time */
-        <div className="p-4 sm:p-5">
-          <div className="p-3 mb-4 rounded-lg bg-blue-950/20 border border-blue-500/30 text-xs text-blue-200 flex items-start gap-2">
-            <History className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
-            <div>
-              <strong>Verified Historical Archive:</strong> These economic releases have already passed. Release times are converted to your local timezone ({userTimeZone || 'Local'}). The live upcoming queue strictly excludes released events so you always receive genuine next catalysts.
+        /* Historical Archive & Post-Mortem Tab */
+        <div className="p-4 space-y-4">
+          {/* Post-Mortem & Rectifications Panel */}
+          <div className="rounded-lg border border-emerald-500/30 bg-[#090e1a] p-3.5">
+            <div className="flex items-center gap-2 mb-2 pb-1.5 border-b border-[#162137]">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <h3 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
+                Post-Mortem: {PPI_POST_RELEASE_RETROSPECTIVE.title} Actual Print & Rectification
+              </h3>
+              <span className="ml-auto text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                Printed: {PPI_POST_RELEASE_RETROSPECTIVE.actualPrintedValue} (Exp: {PPI_POST_RELEASE_RETROSPECTIVE.forecastValue})
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono mb-3">
+              <div className="p-2.5 rounded bg-rose-950/20 border border-rose-900/30">
+                <span className="text-rose-300 font-bold block text-[11px]">
+                  Phase 1 Sweep ({PPI_POST_RELEASE_RETROSPECTIVE.marketOutcome.firstImpactPhase1.duration}):
+                </span>
+                <span className="text-slate-300 text-[11px] font-sans block mt-0.5">
+                  {PPI_POST_RELEASE_RETROSPECTIVE.marketOutcome.firstImpactPhase1.mechanism} ({PPI_POST_RELEASE_RETROSPECTIVE.marketOutcome.firstImpactPhase1.priceMove})
+                </span>
+              </div>
+              <div className="p-2.5 rounded bg-emerald-950/20 border border-emerald-900/30">
+                <span className="text-emerald-300 font-bold block text-[11px]">
+                  Phase 2 Expansion ({PPI_POST_RELEASE_RETROSPECTIVE.marketOutcome.secondImpactPhase2.duration}):
+                </span>
+                <span className="text-slate-300 text-[11px] font-sans block mt-0.5">
+                  {PPI_POST_RELEASE_RETROSPECTIVE.marketOutcome.secondImpactPhase2.mechanism} ({PPI_POST_RELEASE_RETROSPECTIVE.marketOutcome.secondImpactPhase2.priceMove})
+                </span>
+              </div>
+            </div>
+            <div className="p-2.5 rounded bg-[#0d1424] border border-[#1e2a44] text-[11px] text-slate-300 flex items-start gap-2">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <strong className="text-amber-300 font-mono">Engine Rectification:</strong>{' '}
+                {PPI_POST_RELEASE_RETROSPECTIVE.mistakePostMortem.lessonAndRectification}
+              </div>
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-lg border border-slate-800">
+          {/* Historical Table */}
+          <div className="overflow-x-auto rounded-lg border border-[#1b253b]">
             <table className="w-full text-left text-xs font-mono">
-              <thead className="bg-slate-900/90 text-slate-400 border-b border-slate-800">
+              <thead className="bg-[#0d1424] text-slate-400 border-b border-[#1b253b]">
                 <tr>
-                  <th className="p-3">Event Title</th>
-                  <th className="p-3">Currency</th>
-                  <th className="p-3">Local Release Time</th>
-                  <th className="p-3">Actual Print</th>
-                  <th className="p-3">Forecast</th>
-                  <th className="p-3">Previous</th>
-                  <th className="p-3">Status</th>
+                  <th className="p-2.5">Event</th>
+                  <th className="p-2.5">Currency</th>
+                  <th className="p-2.5">Release Time</th>
+                  <th className="p-2.5">Actual</th>
+                  <th className="p-2.5">Forecast</th>
+                  <th className="p-2.5">Prior</th>
+                  <th className="p-2.5">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/60 bg-slate-950/60 text-slate-300">
+              <tbody className="divide-y divide-[#162137] bg-[#070b14] text-slate-300">
                 {releasedEvents.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="p-6 text-center text-slate-500">
-                      No recently released events recorded in this calendar cycle.
+                    <td colSpan={7} className="p-5 text-center text-slate-500">
+                      No recently released events recorded in this calendar window.
                     </td>
                   </tr>
                 ) : (
                   releasedEvents.map((item) => {
                     const localTime = formatToLocalTime(item.eventTime);
                     return (
-                      <tr key={item.id} className="hover:bg-slate-900/40 transition-colors">
-                        <td className="p-3">
+                      <tr key={item.id} className="hover:bg-[#0c1220] transition-colors">
+                        <td className="p-2.5">
                           <div className="font-semibold text-white">{item.title}</div>
                           {item.postReleaseAnalysis && (
-                            <div className="text-[10px] text-emerald-400 font-sans mt-0.5 leading-tight">
+                            <div className="text-[10px] text-emerald-400 font-sans mt-0.5">
                               {item.postReleaseAnalysis}
                             </div>
                           )}
                         </td>
-                        <td className="p-3 text-indigo-400 font-bold">{item.currency}</td>
-                        <td className="p-3 text-slate-300">
-                          {localTime.fullLocalDisplay} <span className="text-slate-500">({formatLiveCountdown(-item.minutesAgo)})</span>
+                        <td className="p-2.5 text-indigo-400 font-bold">{item.currency}</td>
+                        <td className="p-2.5 text-slate-300">
+                          {localTime.timeStr} <span className="text-slate-500">({formatLiveCountdown(-item.minutesAgo)})</span>
                         </td>
-                        <td className="p-3 font-bold text-amber-300">{item.actual}</td>
-                        <td className="p-3 text-slate-400">{item.forecast}</td>
-                        <td className="p-3 text-slate-500">{item.previous}</td>
-                        <td className="p-3">
-                          <span className="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 border border-slate-700">
-                            ✓ RELEASED
+                        <td className="p-2.5 font-bold text-amber-300">{item.actual}</td>
+                        <td className="p-2.5 text-slate-400">{item.forecast}</td>
+                        <td className="p-2.5 text-slate-500">{item.previous}</td>
+                        <td className="p-2.5">
+                          <span className="px-2 py-0.5 rounded text-[10px] bg-[#11192a] text-slate-300 border border-[#1c2944]">
+                            RELEASED
                           </span>
                         </td>
                       </tr>

@@ -36,6 +36,7 @@ import {
   Radio
 } from 'lucide-react';
 import { LiquidityMasterclassModal } from './LiquidityMasterclassModal';
+import { tradingVoice } from '../services/tradingVoiceService';
 
 interface LiquidityHeatmapVisualizerProps {
   candles: Candle[];
@@ -306,29 +307,53 @@ export const LiquidityHeatmapVisualizer: React.FC<LiquidityHeatmapVisualizerProp
     const sweepAudit = modelOutput.sniperEdge?.liquiditySweepAudit;
     const plr = modelOutput.liquidity?.plr || 'UP';
 
-    // 1. REVERSAL (↩️): Strictly ONLY when price is actively testing a defended edge / wall
+    // 1. REVERSAL (↩️) vs BYPASS WARNING (⚠️):
+    // Dynamically checks if the wall is genuinely absorbing or if it is being pulled / consumed!
     if (vaar && vaar.status !== 'INSIDE_VALUE_EQUILIBRIUM') {
       const isShortAbove = vaar.activeSide === 'SHORT_ABOVE_VAH';
       const isLongBelow = vaar.activeSide === 'LONG_BELOW_VAL';
       const distToDefended = Math.abs((current - vaar.defendedLevel) * pipMult);
 
       if ((isShortAbove || isLongBelow) && distToDefended <= 12 && !dismissedMoveIds['active-defended-reversal']) {
-        list.push({
-          id: 'active-defended-reversal',
-          price: vaar.defendedLevel,
-          symbol: '↩️',
-          moveType: 'REVERSAL',
-          badgeTitle: '↩️ REVERSAL',
-          badgeDetail: isShortAbove
-            ? `Passive Seller Absorption @ ${vaar.defendedLevel.toFixed(digits)}`
-            : `Passive Buyer Absorption @ ${vaar.defendedLevel.toFixed(digits)}`,
-          explanation: isShortAbove
-            ? 'Aggressive buyers halted by resting sell limit wall; failure to advance triggers downside reversal.'
-            : 'Aggressive sellers halted by resting buy limit wall; failure to push lower triggers upside reclaim.',
-          color: isShortAbove ? '#f87171' : '#34d399',
-          bgColor: isShortAbove ? '#2b0e14' : '#08291b',
-          borderColor: isShortAbove ? '#ef4444' : '#10b981',
-        });
+        const isSpoofHigh = (mi?.liquidity?.spoofDetector?.spoofProbability ?? 0) >= 0.50;
+        const isGenuineDiscovery = !!vaar.auctionContext?.isGenuinePriceDiscovery;
+        const isBypassRisk = isSpoofHigh || isGenuineDiscovery;
+
+        if (isBypassRisk) {
+          list.push({
+            id: 'active-defended-reversal',
+            price: vaar.defendedLevel,
+            symbol: '⚠️',
+            moveType: 'REVERSAL',
+            badgeTitle: isSpoofHigh ? '⚠️ PULLING (BYPASS RISK)' : '⚡ WALL CONSUMED (NO REVERSAL)',
+            badgeDetail: isSpoofHigh
+              ? `Phantom Limit Depth @ ${vaar.defendedLevel.toFixed(digits)} (Pull Rate: ${Math.round((mi?.liquidity?.spoofDetector?.spoofProbability ?? 0.6) * 100)}%)`
+              : `Aggressive Initiative @ ${vaar.defendedLevel.toFixed(digits)} Overwhelming Limits`,
+            explanation: isSpoofHigh
+              ? 'Warning: High order pulling rate detected. Resting limit orders are being cancelled as price approaches without absorbing volume. Expecting price to bypass this level.'
+              : 'Warning: Aggressive market orders are consuming the resting wall. Do NOT fade into active momentum. If this is a stop-hunt, wait for price to reject the extreme and reclaim value — the system will fire a Confirmed Reversal signal the moment the reclaim is proven.',
+            color: isSpoofHigh ? '#facc15' : '#fb923c',
+            bgColor: isSpoofHigh ? '#2a2205' : '#2b1206',
+            borderColor: isSpoofHigh ? '#eab308' : '#ea580c',
+          });
+        } else {
+          list.push({
+            id: 'active-defended-reversal',
+            price: vaar.defendedLevel,
+            symbol: '↩️',
+            moveType: 'REVERSAL',
+            badgeTitle: vaar.status === 'ABSORPTION_AND_RECLAIM_TRIGGERED' ? '↩️ CONFIRMED REVERSAL' : '↩️ REVERSAL',
+            badgeDetail: isShortAbove
+              ? `Passive Seller Absorption @ ${vaar.defendedLevel.toFixed(digits)}`
+              : `Passive Buyer Absorption @ ${vaar.defendedLevel.toFixed(digits)}`,
+            explanation: isShortAbove
+              ? 'Aggressive buyers halted by resting sell limit wall; failure to advance triggers downside reversal.'
+              : 'Aggressive sellers halted by resting buy limit wall; failure to push lower triggers upside reclaim.',
+            color: isShortAbove ? '#f87171' : '#34d399',
+            bgColor: isShortAbove ? '#2b0e14' : '#08291b',
+            borderColor: isShortAbove ? '#ef4444' : '#10b981',
+          });
+        }
       }
     } else if (modelOutput.sniperEdge?.isEdgeQualified) {
       // Sniper Edge is qualified at edgePrice
@@ -1232,6 +1257,13 @@ export const LiquidityHeatmapVisualizer: React.FC<LiquidityHeatmapVisualizerProp
                       className="cursor-pointer transition-all"
                       onMouseEnter={() => setHoveredExpectedMove(lvl)}
                       onMouseLeave={() => setHoveredExpectedMove(null)}
+                      onClick={() => {
+                        tradingVoice.unlockAudio();
+                        tradingVoice.speak(
+                          `Expected move alert for ${instrument.name || instrument.symbol}. ${lvl.badgeTitle} at ${lvl.price.toFixed(digits)}. ${lvl.explanation}`,
+                          { priority: true, force: true, symbol: instrument.symbol }
+                        );
+                      }}
                     >
                       {/* Horizontal Level Guide Line spanning the heatmap */}
                       <line

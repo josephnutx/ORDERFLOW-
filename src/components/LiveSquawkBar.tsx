@@ -972,6 +972,15 @@ export const LiveSquawkBar: React.FC<LiveSquawkBarProps> = ({
               <div className="flex flex-wrap items-center gap-1.5">
                 {onGenerateAlertNow && (
                   <>
+                    <button
+                      onClick={() => onGenerateAlertNow('CONFIRMED_REVERSAL')}
+                      className="px-2.5 py-1 text-[11px] font-mono font-bold rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 shadow-sm flex items-center gap-1.5 cursor-pointer transition-all"
+                      title="Scan and announce confirmed absorption reversal at defended extremes (VAH/VAL/Iceberg Walls)"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                      <span>↩️ Scan Reversal Alert</span>
+                    </button>
+
                     {/* PRIMARY UNIFIED ACTION: Combines all 5 engines into one genuine institutional signal */}
                     <button
                       onClick={() => onGenerateAlertNow('UNIFIED_CONFLUENCE_SIGNAL')}

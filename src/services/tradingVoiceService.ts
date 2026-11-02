@@ -3,7 +3,7 @@
 
 import { Candle, OrderBookSnapshot, FootprintBubble } from '../types/orderbook';
 import { SniperModelOutput } from '../types/sniperModel';
-import { getInstrumentPrecision, formatPriceExact } from './precisionUtils';
+import { getInstrumentPrecision, formatPriceExact, formatPriceForAudio, phoneticallyFormatAllPricesInText } from './precisionUtils';
 import { getMarketScheduleStatus } from './marketHoursService';
 
 export type SquawkCadence = 'continuous' | 'balanced' | 'alerts_only' | 'on_review' | 'muted';
@@ -574,7 +574,7 @@ class TradingVoiceEngine {
   public sanitizeForSpeech(text: string): string {
     if (!text) return '';
 
-    return text
+    const cleaned = text
       // 1. Strip all unicode emojis, symbols, pictographs, drawings, and dingbats
       // Covers 🎯 (bullseye/target/sniper), 🏹, 🔫, ⚡, 🚀, 🟢, 🔴, 🛑, ⚠️, 🚨, 🏆, 🔥, 📊, 📈, 📉, 🎙️, 🔊, etc.
       .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{2300}-\u{23FF}\u{2B50}-\u{2B55}\u{200D}\u{200B}]/gu, '')
@@ -640,6 +640,10 @@ class TradingVoiceEngine {
       // Clean multiple spaces and trim
       .replace(/\s{2,}/g, ' ')
       .trim();
+
+    // Convert any raw price decimals embedded in speech text to crystal-clear phonetic words
+    // (e.g. "1.08450" -> "1 point zero eight four five zero", "2742.50" -> "2742 point five zero")
+    return phoneticallyFormatAllPricesInText(cleaned);
   }
 
   /**
@@ -652,9 +656,8 @@ class TradingVoiceEngine {
     reason: string = 'Stop loss breached'
   ): string {
     const symClean = getFullSymbolName(symbol);
-    const digits = getInstrumentPrecision(symbol);
-    const priceStr = currentPrice.toFixed(digits);
-    const slStr = stopLossPrice.toFixed(digits);
+    const priceStr = formatPriceForAudio(currentPrice, symbol);
+    const slStr = formatPriceForAudio(stopLossPrice, symbol);
     return `Stop loss invalidation on ${symClean}! Price has breached ${slStr} to ${priceStr}. ${reason}. The order flow edge is invalidated. Standing down immediately and waiting for next setup.`;
   }
 
@@ -666,18 +669,36 @@ class TradingVoiceEngine {
     target: 'TP1' | 'TP2' | 'TP3',
     pips: number,
     totalSecured: number,
-    optimalEntry: number,
-    digits?: number
+    optimalEntry: number
   ): string {
     const symClean = getFullSymbolName(symbol);
-    const effectiveDigits = digits ?? getInstrumentPrecision(symbol);
+    const entryStr = formatPriceForAudio(optimalEntry, symbol);
     if (target === 'TP1') {
-      return `Take profit 1 hit on ${symClean}! ${pips} pips secured. Trailing stop loss to breakeven at ${optimalEntry.toFixed(effectiveDigits)}. Runner position targeting Take profit 2.`;
+      return `Take profit 1 hit on ${symClean}! ${pips} pips secured. Trailing stop loss to breakeven at ${entryStr}. Runner position targeting Take profit 2.`;
     }
     if (target === 'TP2') {
       return `Take profit 2 hit on ${symClean}! ${pips} pips secured, total ${totalSecured} pips booked. Runner targeting Take profit 3 macro liquidity.`;
     }
     return `All Take profit targets completed on ${symClean}! Total ${totalSecured} pips secured. Signal completed and removed from chart. Scanning for next setup in ${symClean}.`;
+  }
+
+  /**
+   * Generates spoken announcement for Confirmed Auction / Absorption Reversals
+   */
+  public generateReversalSpeech(
+    symbol: string,
+    currentPrice: number,
+    reversalSide: 'BULLISH' | 'BEARISH',
+    defendedLevel: number,
+    targetPrice: number,
+    exhaustionScore: number = 88
+  ): string {
+    const symClean = getFullSymbolName(symbol);
+    const pStr = formatPriceForAudio(currentPrice, symbol);
+    const defStr = formatPriceForAudio(defendedLevel, symbol);
+    const targetStr = formatPriceForAudio(targetPrice, symbol);
+    const isBull = reversalSide === 'BULLISH';
+    return `Confirmed ${isBull ? 'bullish' : 'bearish'} reversal alert on ${symClean} at ${pStr}! Aggressive ${isBull ? 'sellers' : 'buyers'} met heavy institutional absorption at ${defStr} with ${exhaustionScore} percent exhaustion. Price has rejected the extreme and reclaimed value. High-conviction reversal locked in, targeting ${targetStr}.`;
   }
 
   /**
@@ -692,9 +713,8 @@ class TradingVoiceEngine {
     modelOutput: SniperModelOutput,
     bubbles?: FootprintBubble[]
   ): string {
-    const digits = getInstrumentPrecision(symbol);
-    const priceStr = currentPrice.toFixed(digits);
     const symClean = getFullSymbolName(symbol);
+    const priceStr = formatPriceForAudio(currentPrice, symbol);
 
     // If market is currently closed:
     if (modelOutput.marketSchedule?.shouldPauseModel) {
@@ -710,11 +730,13 @@ class TradingVoiceEngine {
     const poc = modelOutput.valueStructure.poc;
     const vah = modelOutput.valueStructure.vah;
     const val = modelOutput.valueStructure.val;
-    const exhaust = modelOutput.exhaustion;
+    const pocStr = formatPriceForAudio(poc, symbol);
+    const vahStr = formatPriceForAudio(vah, symbol);
+    const valStr = formatPriceForAudio(val, symbol);
 
     // Reason why price revisits this price level repeatedly:
     const levelRevisitExplanation =
-      `Price keeps revisiting the ${poc.toFixed(digits)} price level because the Point of Control represents the session's highest transactional volume where buyers and sellers agreed on fair price. Institutional iceberg limit orders reload at this node, acting as a gravitational anchor. Every time price moves away without aggressive initiative volume, the lack of opposing orders creates a liquidity vacuum that pulls price right back to absorb unfinished business. `;
+      `Price keeps revisiting the ${pocStr} price level because the Point of Control represents the session's highest transactional volume where buyers and sellers agreed on fair price. Institutional iceberg limit orders reload at this node, acting as a gravitational anchor. Every time price moves away without aggressive initiative volume, the lack of opposing orders creates a liquidity vacuum that pulls price right back to absorb unfinished business. `;
 
     let speech = `Live order flow analysis for ${symClean} at ${priceStr}. `;
 
@@ -746,18 +768,25 @@ class TradingVoiceEngine {
 
     if (edge.isEdgeQualified) {
       const isBuy = edge.triggerAction === 'SNIPER_BUY';
-      const sweptP = edge.liquiditySweepAudit?.sweptLiquidityPrice?.toFixed(digits) || (isBuy ? val.toFixed(digits) : vah.toFixed(digits));
+      const rawSweptP = edge.liquiditySweepAudit?.sweptLiquidityPrice || (isBuy ? val : vah);
+      const sweptPStr = formatPriceForAudio(rawSweptP, symbol);
       const sweptLots = edge.liquiditySweepAudit?.sweptLiquidityVolumeLots || 420;
       const confluenceScore = edge.confidenceScore || modelOutput.marketIntelligence?.entryEngine?.confidence || 96;
+      const entryStr = formatPriceForAudio(edge.optimalEntry, symbol);
+      const slStr = formatPriceForAudio(edge.hardStopLoss, symbol);
+      const tp1Str = formatPriceForAudio(edge.targetTP1, symbol);
+      const tp2Str = formatPriceForAudio(edge.targetTP2, symbol);
+
       speech += `Final verdict: ${isBuy ? 'SNIPER LONG BUY CONFIRMED' : 'SNIPER SHORT SELL CONFIRMED'} with ${confluenceScore} percent institutional confluence. `;
-      speech += `Here is what you should do: Execute limit ${isBuy ? 'buy' : 'sell'} at ${edge.optimalEntry.toFixed(digits)}. Set protected hard stop loss strictly at ${edge.hardStopLoss.toFixed(digits)}. Bank fifty percent at Take Profit 1 at ${edge.targetTP1.toFixed(digits)}, then immediately trail stop loss to breakeven, holding runners for Take Profit 2 at ${edge.targetTP2.toFixed(digits)}. `;
+      speech += `Here is what you should do: Execute limit ${isBuy ? 'buy' : 'sell'} at ${entryStr}. Set protected hard stop loss strictly at ${slStr}. Bank fifty percent at Take Profit 1 at ${tp1Str}, then immediately trail stop loss to breakeven, holding runners for Take Profit 2 at ${tp2Str}. `;
       speech += `Here is what you should not do: Do not chase market orders once the candle displaces, and do not widen your stop loss. `;
-      speech += `Regarding pre-move opportunity before any move: An active early window is open right now. Smart money has completed the sweep at ${sweptP} with ${sweptLots} lots and is stacking limit orders before retail momentum breakout traders arrive. `;
+      speech += `Regarding pre-move opportunity before any move: An active early window is open right now. Smart money has completed the sweep at ${sweptPStr} with ${sweptLots} lots and is stacking limit orders before retail momentum breakout traders arrive. `;
     } else if (edge.status === 'ALL_TARGETS_COMPLETED') {
       speech += `Final verdict: All profit targets completed on ${symClean}, locking in ${edge.achievedPips || 80} pips. What you should do is preserve profits and stand by for the next institutional cycle.`;
     } else {
-      const magnetP = edge.liquiditySweepAudit?.unclaimedAttractingPoolPrice?.toFixed(digits) || poc.toFixed(digits);
-      speech += `Final verdict: Stand down in cash. Price is rotating near fair value. What you should do is set alerts at ${vah.toFixed(digits)} and ${val.toFixed(digits)} and keep powder dry. What you should not do is trade choppy chop inside the range. Pre-move accumulation has not triggered yet while unswept liquidity at ${magnetP} remains active.`;
+      const rawMagnetP = edge.liquiditySweepAudit?.unclaimedAttractingPoolPrice || poc;
+      const magnetPStr = formatPriceForAudio(rawMagnetP, symbol);
+      speech += `Final verdict: Stand down in cash. Price is rotating near fair value. What you should do is set alerts at ${vahStr} and ${valStr} and keep powder dry. What you should not do is trade choppy chop inside the range. Pre-move accumulation has not triggered yet while unswept liquidity at ${magnetPStr} remains active.`;
     }
 
     return speech;
@@ -776,8 +805,7 @@ class TradingVoiceEngine {
     extra?: { levelName?: string; priceLevel?: number; detail?: string }
   ): { text: string; category: SquawkTranscriptItem['category'] } {
     const symClean = getFullSymbolName(symbol);
-    const digits = getInstrumentPrecision(symbol);
-    const priceStr = currentPrice.toFixed(digits);
+    const priceStr = formatPriceForAudio(currentPrice, symbol);
 
     // If market is closed, do not generate active market action commentary
     if (modelOutput.marketSchedule?.shouldPauseModel) {
@@ -834,10 +862,14 @@ class TradingVoiceEngine {
     const isBull = lastCandle ? lastCandle.close >= lastCandle.open : isBuy;
     const trappedShorts = Math.round(snapshot.rightBook?.lossSellersPct || 0);
     const trappedLongs = Math.round(snapshot.rightBook?.lossBuyersPct || 0);
+    const vahStr = formatPriceForAudio(modelOutput.valueStructure.vah, symbol);
+    const valStr = formatPriceForAudio(modelOutput.valueStructure.val, symbol);
+    const slStr = formatPriceForAudio(edge.hardStopLoss, symbol);
+
     const variations = [
       `Live tape read on ${symClean} at ${priceStr}: Institutional ${isBull ? 'buy' : 'sell'} contracts are stacking across consecutive footprint nodes while passive ${isBull ? 'bid walls' : 'offer ceilings'} reload behind price, coiling the tape for directional expansion.`,
-      `${symClean} active order flow at ${priceStr}: Offside retail ${trappedShorts >= trappedLongs ? 'shorts' : 'longs'} are caught underwater against ${modelOutput.orderFlow.deltaTrend.toLowerCase()} cumulative delta, fueling a forced liquidation squeeze toward ${isBull ? modelOutput.valueStructure.vah.toFixed(digits) : modelOutput.valueStructure.val.toFixed(digits)}.`,
-      `Momentum update on ${symClean} at ${priceStr}: Aggressive ${isBull ? 'buyers' : 'sellers'} are sweeping resting depth through a low volume pocket, generating rapid vertical candle displacement. ${edge.isEdgeQualified ? `Active ${isBuy ? 'Buy' : 'Sell'} setup remains locked with stop protected at ${edge.hardStopLoss.toFixed(digits)}.` : `Watching for institutional absorption at the next structural wall.`}`,
+      `${symClean} active order flow at ${priceStr}: Offside retail ${trappedShorts >= trappedLongs ? 'shorts' : 'longs'} are caught underwater against ${modelOutput.orderFlow.deltaTrend.toLowerCase()} cumulative delta, fueling a forced liquidation squeeze toward ${isBull ? vahStr : valStr}.`,
+      `Momentum update on ${symClean} at ${priceStr}: Aggressive ${isBull ? 'buyers' : 'sellers'} are sweeping resting depth through a low volume pocket, generating rapid vertical candle displacement. ${edge.isEdgeQualified ? `Active ${isBuy ? 'Buy' : 'Sell'} setup remains locked with stop protected at ${slStr}.` : `Watching for institutional absorption at the next structural wall.`}`,
     ];
     const pick = variations[Math.floor(Math.random() * variations.length)];
     return { text: pick, category: 'PRICE_ACTION' };

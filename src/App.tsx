@@ -1135,6 +1135,7 @@ export default function App() {
   const maxSessionPriceRef = useRef<number>(effectivePrice);
   const minSessionPriceRef = useRef<number>(effectivePrice);
   const lastSpokenSetupKeyRef = useRef<string>('');
+  const lastSpokenReversalKeyRef = useRef<string>('');
   const lastImbalanceSpokenTimeRef = useRef<number>(Date.now());
   const lastAutoPulseTimeRef = useRef<number>(Date.now());
   const lastSpokenBubbleIdRef = useRef<string>('');
@@ -1158,21 +1159,25 @@ export default function App() {
         return;
       }
 
-      // Speak ONE unified trading brief when loading or switching charts
+      // Speak ONE unified trading brief when loading or switching charts (300ms debounce allows live tick data to settle)
       const settings = tradingVoice.getSettings();
       if (isVoiceAlertsEnabled && settings.enabled && settings.cadence !== 'muted') {
-        const text = tradingVoice.generateInstantBriefing(
-          currentSymbol,
-          effectivePrice,
-          effectiveCandles,
-          effectiveSnapshot,
-          modelOutput,
-          effectiveBubbles
-        );
-        tradingVoice.speak(text, { priority: true, force: true, category: 'BRIEFING', symbol: currentSymbol });
+        const timer = setTimeout(() => {
+          const livePrice = liveMarketMap[`${currentSymbol}_${currentTimeframe}`]?.price ?? effectivePrice;
+          const text = tradingVoice.generateInstantBriefing(
+            currentSymbol,
+            livePrice,
+            effectiveCandles,
+            effectiveSnapshot,
+            modelOutput,
+            effectiveBubbles
+          );
+          tradingVoice.speak(text, { priority: true, force: true, category: 'BRIEFING', symbol: currentSymbol });
+        }, 300);
+        return () => clearTimeout(timer);
       }
     }
-  }, [currentSymbol, effectivePrice, isVoiceAlertsEnabled, effectiveCandles, effectiveSnapshot, modelOutput, effectiveBubbles]);
+  }, [currentSymbol, effectivePrice, isVoiceAlertsEnabled, effectiveCandles, effectiveSnapshot, modelOutput, effectiveBubbles, currentTimeframe, liveMarketMap]);
 
   // Continuous Proactive AI Voice Surveillance: Strictly paced (minimum 42s between any two automatic alerts, never interrupts active speech)
   useEffect(() => {
@@ -1192,6 +1197,57 @@ export default function App() {
     // or if ANY alert/briefing fired within the last 42 seconds!
     if (tradingVoice.isSpeaking() || now - lastGlobalAlertTimeRef.current < 42000) {
       return;
+    }
+
+    // 0. Confirmed Reversal Surveillance:
+    // If an institutional absorption reversal is triggered at the defended level, immediately fire a high-priority voice announcement!
+    const vaar = modelOutput.valueAreaAbsorptionReclaim;
+    if (vaar && vaar.status === 'ABSORPTION_AND_RECLAIM_TRIGGERED' && vaar.signal?.triggerConditionMet) {
+      const isBull = vaar.activeSide === 'LONG_BELOW_VAL' || vaar.signal.action === 'BUY';
+      const reversalSide: 'BULLISH' | 'BEARISH' = isBull ? 'BULLISH' : 'BEARISH';
+      const reversalKey = `${currentSymbol}_REV_${reversalSide}_${Math.round(vaar.defendedLevel * 100)}`;
+      
+      if (lastSpokenReversalKeyRef.current !== reversalKey) {
+        lastSpokenReversalKeyRef.current = reversalKey;
+        lastAutoPulseTimeRef.current = now;
+        lastGlobalAlertTimeRef.current = now;
+
+        const revAlert = buildStructuredAlert(
+          'CONFIRMED_REVERSAL',
+          currentSymbol,
+          effectivePrice,
+          modelOutput,
+          modelOutput.marketIntelligence,
+          {
+            reversalSide,
+            reversalLevelName: vaar.defendedLevelLabel,
+            defendedPrice: vaar.defendedLevel,
+            targetPrice: modelOutput.valueStructure.poc,
+            exhaustionPct: Math.max(88, modelOutput.exhaustion.exhaustionScore || 90),
+          }
+        );
+
+        setLiveStructuredAlerts((prev) => [
+          revAlert,
+          ...prev.filter((a) => !(a.symbol === revAlert.symbol && a.type === revAlert.type)),
+        ].slice(0, 25));
+
+        setToastMessage({
+          id: revAlert.id,
+          title: `↩️ REVERSAL CONFIRMED on ${currentSymbol}!`,
+          subtitle: `${reversalSide} reversal active at ${vaar.defendedLevel.toFixed(currentInst.digits)}. Target: POC (${modelOutput.valueStructure.poc.toFixed(currentInst.digits)})`,
+        });
+
+        playTargetHitSound('ALERT');
+        tradingVoice.speak(revAlert.spokenText, {
+          priority: true,
+          force: true,
+          category: 'STRUCTURED_ALERT',
+          symbol: currentSymbol,
+          cooldownMs: 25000,
+        });
+        return;
+      }
     }
 
     // 1. Armed setup direction change announcement: Only fires when the pair's directional triggerAction actually flips
