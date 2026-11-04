@@ -103,6 +103,8 @@ export const InfographicEngine: React.FC<InfographicEngineProps> = ({
   const [calendarSortOrder, setCalendarSortOrder] = useState<'LATEST_TO_NEWEST' | 'NEWEST_TO_LATEST'>('LATEST_TO_NEWEST');
   const [newsSearchQuery, setNewsSearchQuery] = useState<string>('');
   const [isRefreshingFeed, setIsRefreshingFeed] = useState<boolean>(false);
+  const [showAuctionGuide, setShowAuctionGuide] = useState<boolean>(true);
+  const [isSpeakingAuction, setIsSpeakingAuction] = useState<boolean>(false);
 
   // Sync news & calendar ONLY when selected symbol changes (never on streaming price ticks)
   useEffect(() => {
@@ -534,178 +536,390 @@ export const InfographicEngine: React.FC<InfographicEngineProps> = ({
       )}
 
       {/* ========================================================
-          LEVEL 2 & 3: MAIN MARKET AUCTION INFOGRAPHIC CANVAS
-          (Section 6 of Specification: Value High, POC Bell Curve, Value Low, Current Price Glow, Path Arrow)
+          LEVEL 2 & 3: MAIN MARKET AUCTION INFOGRAPHIC CANVAS & PLAIN-ENGLISH INTERPRETER
+          (Simplified, intuitive, zero-jargon explanation of Floor, Fair Value Magnet, and Ceiling)
          ======================================================== */}
-      <div className="bg-[#0b101b] rounded-lg border border-[#1b253b] p-4 relative overflow-hidden">
-        <div className="flex items-center justify-between border-b border-[#182236] pb-3 mb-4">
-          <div className="flex items-center gap-2">
-            <Compass className="w-4 h-4 text-cyan-400" />
-            <h3 className="text-sm font-bold tracking-wide text-white uppercase">
-              Market Auction & Value Anatomy
-            </h3>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs font-mono text-slate-400">
-            <span>Profile: <strong className="text-amber-400">{valueStructure.dayProfileShape}</strong></span>
-            <span>·</span>
-            <span>Migration: <strong className="text-cyan-400">{valueStructure.valueMigration}</strong></span>
-          </div>
-        </div>
+      {(() => {
+        const curPrice = location.currentPrice;
+        const vahPrice = valueStructure.vah;
+        const valPrice = valueStructure.val;
+        const pocPrice = valueStructure.poc;
+        const pipMultiplier = currentSym.includes('JPY') ? 100 : currentSym === 'XAUUSD' ? 10 : 10000;
 
-        {/* The Graphic Canvas */}
-        <div className="relative min-h-[300px] h-auto sm:h-72 w-full bg-[#080d16] rounded-md border border-[#162033] p-2.5 sm:p-4 flex flex-col justify-between overflow-hidden gap-1.5 sm:gap-2">
-          {/* Subtle Background Bell Curve for Market Profile Value Distribution */}
-          <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-20" preserveAspectRatio="none" viewBox="0 0 400 200">
-            <defs>
-              <linearGradient id="bellGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.4" />
-                <stop offset="50%" stopColor="#eab308" stopOpacity="0.6" />
-                <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.1" />
-              </linearGradient>
-            </defs>
-            {/* Horizontal Bell Profile curve centered around POC */}
-            <path
-              d="M 120 20 C 260 20, 360 80, 360 100 C 360 120, 260 180, 120 180 Z"
-              fill="url(#bellGrad)"
-            />
-          </svg>
+        const distPocPips = Math.round(Math.abs(curPrice - pocPrice) * pipMultiplier);
+        const isBelowFloor = curPrice < valPrice;
+        const isAboveCeiling = curPrice > vahPrice;
+        const isAtEquilibrium = Math.abs(curPrice - pocPrice) * pipMultiplier <= 2.5;
+        const isDiscountZone = !isBelowFloor && !isAboveCeiling && curPrice < pocPrice;
 
-          {/* 1. VALUE HIGH (VAH) Boundary */}
-          <div className="relative z-10 flex items-center justify-between border-b-2 border-dashed border-amber-500/70 pb-1">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-amber-400 tracking-wider">VALUE HIGH (VAH)</span>
-              <span className="text-[11px] text-slate-400 font-mono hidden md:inline">Upper Value Boundary / Rejection Threshold</span>
-            </div>
-            <span className="text-xs font-mono font-bold text-amber-300 tabular-nums">
-              {valueStructure.vah.toFixed(digits)}
-            </span>
-          </div>
+        let statusBadgeText = '';
+        let statusBadgeBg = '';
+        let statusBadgeBorder = '';
+        let statusBadgeColor = '';
+        let statusPlainHeadline = '';
+        let statusPlainExplanation = '';
+        let statusActionRule = '';
 
-          {/* Above VAH: Buyer Exhaustion & Seller Absorption Visual Banner */}
-          {vaar && (vaar.activeSide === 'SHORT_ABOVE_VAH' || location.currentPrice >= valueStructure.vah - 0.5) && (
-            <div className="relative z-10 px-3 py-1.5 bg-red-950/50 border border-red-500/40 rounded flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
-              <div className="flex items-center gap-2">
-                <span className="px-1.5 py-0.5 rounded bg-red-900 text-red-200 text-[10px] font-bold">
-                  BUY ABSORPTION BUBBLE
-                </span>
-                <span className="text-red-300 font-bold">
-                  Passive Seller Wall @ {vaar.defendedLevel.toFixed(digits)}
-                </span>
-                <span className="text-slate-400 text-[11px] hidden sm:inline">
-                  (Aggressive buyers failing to push higher · Failure Point: {vaar.auctionContext.orderFlowEvidence.failurePointPrice.toFixed(digits)})
-                </span>
+        if (isBelowFloor) {
+          statusBadgeText = '🛒 WHOLESALE DISCOUNT (CHEAP ZONE)';
+          statusBadgeBg = 'bg-emerald-950/80';
+          statusBadgeBorder = 'border-emerald-500/50';
+          statusBadgeColor = 'text-emerald-300';
+          statusPlainHeadline = `Price is CHEAP (${Math.round((valPrice - curPrice) * pipMultiplier)} pips below the Day's Floor)`;
+          statusPlainExplanation = `Price has fallen below the normal Value Floor (${valPrice.toFixed(digits)}). In auction theory, this is like a clearance sale: institutional buyers see this price as a bargain and are actively stepping in to buy. Expect price to snap back UP like a rubber band toward Fair Value (${pocPrice.toFixed(digits)}).`;
+          statusActionRule = `FAVOR BUY/LONG SETUPS: Do NOT sell here (sellers get trapped at the lows). Look for buyers absorbing sell orders and pushing back into value.`;
+        } else if (isAboveCeiling) {
+          statusBadgeText = '🏷️ PREMIUM EXPENSIVE (OVERPRICED ZONE)';
+          statusBadgeBg = 'bg-rose-950/80';
+          statusBadgeBorder = 'border-rose-500/50';
+          statusBadgeColor = 'text-rose-300';
+          statusPlainHeadline = `Price is EXPENSIVE (${Math.round((curPrice - vahPrice) * pipMultiplier)} pips above the Day's Ceiling)`;
+          statusPlainExplanation = `Price is trading above the normal Value Ceiling (${vahPrice.toFixed(digits)}). Big institutions consider this expensive and use this zone to take profits or initiate short positions. Unless explosive volume breaks out, price will reject and fall back DOWN toward Fair Value (${pocPrice.toFixed(digits)}).`;
+          statusActionRule = `FAVOR SELL/SHORT SETUPS: Do NOT buy at the top (buyers get trapped at highs). Look for buyers stalling and price rolling back down toward Fair Value.`;
+        } else if (isAtEquilibrium) {
+          statusBadgeText = '⚖️ AT FAIR VALUE (EQUILIBRIUM MAGNET)';
+          statusBadgeBg = 'bg-cyan-950/80';
+          statusBadgeBorder = 'border-cyan-500/50';
+          statusBadgeColor = 'text-cyan-300';
+          statusPlainHeadline = `Price is BALANCED right at Point of Control (${pocPrice.toFixed(digits)})`;
+          statusPlainExplanation = `Price is sitting right at the Fair Value Center where the vast majority of today's contracts traded. Buyers and sellers agree this price is fair. Because price is right in the middle, there is NO distinct directional edge right now.`;
+          statusActionRule = `WAIT FOR EXTREMES: Patient traders do not enter at Fair Value. Wait for price to reach the Cheap Floor or Expensive Ceiling for high-probability trades.`;
+        } else if (isDiscountZone) {
+          statusBadgeText = '📈 DISCOUNT RANGE (PULLING UPWARD TO FAIR VALUE)';
+          statusBadgeBg = 'bg-teal-950/80';
+          statusBadgeBorder = 'border-teal-500/50';
+          statusBadgeColor = 'text-teal-300';
+          statusPlainHeadline = `Price is in the Lower Half of Value (${distPocPips} pips below Fair Value)`;
+          statusPlainExplanation = `Price is between the Value Floor (${valPrice.toFixed(digits)}) and Fair Value (${pocPrice.toFixed(digits)}). The Point of Control at ${pocPrice.toFixed(digits)} acts as an overhead magnet pulling price up toward equilibrium.`;
+          statusActionRule = `FAVOR LONGS TOWARD MAGNET: Target is Fair Value POC @ ${pocPrice.toFixed(digits)}. Take profit as price approaches the center.`;
+        } else {
+          statusBadgeText = '📉 PREMIUM RANGE (PULLING DOWNWARD TO FAIR VALUE)';
+          statusBadgeBg = 'bg-amber-950/80';
+          statusBadgeBorder = 'border-amber-500/50';
+          statusBadgeColor = 'text-amber-300';
+          statusPlainHeadline = `Price is in the Upper Half of Value (${distPocPips} pips above Fair Value)`;
+          statusPlainExplanation = `Price is between Fair Value (${pocPrice.toFixed(digits)}) and the Ceiling (${vahPrice.toFixed(digits)}). The Point of Control at ${pocPrice.toFixed(digits)} acts as a downward magnet pulling price back down toward equilibrium.`;
+          statusActionRule = `FAVOR SHORTS OR PROFIT-TAKING: Target is Fair Value POC @ ${pocPrice.toFixed(digits)}.`;
+        }
+
+        const handleSpeakAuctionBrief = () => {
+          setIsSpeakingAuction(true);
+          const speech = `Market auction breakdown for ${currentSym}. ${statusPlainHeadline}. ${statusPlainExplanation}. Strategy recommendation: ${statusActionRule}`;
+          tradingVoice.speak(speech, {
+            category: 'BRIEFING',
+            symbol: currentSym,
+            priority: true,
+            force: true,
+          });
+          setTimeout(() => setIsSpeakingAuction(false), 4500);
+        };
+
+        return (
+          <div className="bg-[#0b101b] rounded-lg border border-[#1b253b] p-3.5 sm:p-4 relative overflow-hidden shadow-xl">
+            {/* 1. Header with Mode & Voice Squawk Button */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#182236] pb-3 mb-3.5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-cyan-950 text-cyan-400 border border-cyan-500/40 flex items-center justify-center font-bold">
+                  <Compass className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold tracking-wide text-white uppercase">
+                      Market Auction & Value Anatomy
+                    </h3>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-950 text-cyan-300 border border-cyan-500/40">
+                      PLAIN-ENGLISH INTERPRETER
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    How buyers and sellers are valuing {currentSym} today (Floor, Magnet & Ceiling)
+                  </p>
+                </div>
               </div>
-              <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
-                vaar.auctionContext.isFailedAuctionReversion 
-                  ? 'bg-amber-950 text-amber-300 border border-amber-500/40' 
-                  : 'bg-red-900 text-red-100'
-              }`}>
-                {vaar.auctionContext.isFailedAuctionReversion 
-                  ? 'Low Vol + Absorption → Mean-Reversion' 
-                  : 'Monitoring Acceptance'}
-              </span>
-            </div>
-          )}
 
-          {/* Target Cluster Area (Near VAH) */}
-          <div className="relative z-10 flex items-center justify-between px-3 py-1 bg-purple-950/30 border border-purple-500/30 rounded text-[11px] font-mono text-purple-300">
-            <div className="flex items-center gap-2">
-              <Target className="w-3.5 h-3.5 text-purple-400" />
-              <span>TARGET AREA (TP2 Main Liquidity Wall)</span>
-            </div>
-            <span className="font-bold text-purple-200">{signal.targetTP2.toFixed(digits)}</span>
-          </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Voice Interpreter Button */}
+                <button
+                  onClick={handleSpeakAuctionBrief}
+                  disabled={isSpeakingAuction}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded border transition-colors flex items-center gap-1.5 cursor-pointer ${
+                    isSpeakingAuction
+                      ? 'bg-cyan-500 text-black border-cyan-400 animate-pulse font-bold'
+                      : 'bg-[#121c2d] hover:bg-[#1a283f] text-cyan-300 border-cyan-500/30'
+                  }`}
+                  title="Listen to spoken plain-English auction explanation"
+                >
+                  <Volume2 className={`w-3.5 h-3.5 ${isSpeakingAuction ? 'animate-bounce' : 'text-cyan-400'}`} />
+                  <span>{isSpeakingAuction ? 'Speaking...' : 'Listen in Simple Words'}</span>
+                </button>
 
-          {/* 2. FAIR VALUE CENTER (POC) */}
-          <div className="relative z-10 flex items-center justify-between py-1 px-3 bg-cyan-950/40 border border-cyan-500/40 rounded-sm">
-            <div className="flex items-center gap-2">
-              <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse shadow-sm shadow-cyan-400" />
-              <span className="text-xs font-bold text-cyan-300 tracking-wide">FAIR VALUE CENTER (POC)</span>
-              <span className="text-[11px] text-slate-400 font-mono hidden sm:inline">— Point of Highest Volume & Equilibrium</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-mono font-bold text-cyan-200 tabular-nums">
-                {valueStructure.poc.toFixed(digits)}
-              </span>
-            </div>
-          </div>
+                {/* Guide Toggle */}
+                <button
+                  onClick={() => setShowAuctionGuide((v) => !v)}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded border transition-colors flex items-center gap-1 cursor-pointer ${
+                    showAuctionGuide
+                      ? 'bg-amber-950/70 text-amber-300 border-amber-500/40'
+                      : 'bg-[#121827] text-slate-400 border-[#1e273a]'
+                  }`}
+                >
+                  <HelpCircle className="w-3.5 h-3.5" />
+                  <span>{showAuctionGuide ? 'Hide 10s Guide' : 'Show 10s Guide'}</span>
+                </button>
 
-          {/* Directional Trajectory Path Arrow */}
-          <div className="relative z-10 flex items-center justify-center my-0.5">
-            <div className="flex items-center gap-2 px-3 py-1 bg-[#121a2a] border border-[#202e48] rounded-full text-xs font-mono">
-              <span className="text-slate-400">MODEL EXPECTATION:</span>
-              <span className="font-bold text-cyan-300 flex items-center gap-1">
-                {signal.expectedPath.description}
-                {isUp ? <ArrowUpRight className="w-4 h-4 text-emerald-400" /> : <ArrowDownRight className="w-4 h-4 text-red-400" />}
-              </span>
-            </div>
-          </div>
-
-          {/* 3. CURRENT PRICE ACTIVE MARKER (Prominent with Cyan Glow) */}
-          <div className="relative z-10 flex items-center justify-between py-1.5 px-3 bg-gradient-to-r from-cyan-900/60 to-[#0e1724] border-2 border-cyan-400 rounded shadow-md shadow-cyan-500/20">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-cyan-400 shadow-md shadow-cyan-300 animate-ping" />
-              <span className="text-xs font-extrabold text-white tracking-wide">CURRENT PRICE</span>
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-400 text-black uppercase">
-                {location.relationToValue}
-              </span>
-              <span className="text-[11px] text-slate-300 font-mono hidden sm:inline">
-                {location.isDiscount ? '(Deep Discount Zone - Favor Longs)' : '(Premium Zone - Favor Shorts)'}
-              </span>
-            </div>
-            <span className="text-sm font-mono font-black text-cyan-200 tabular-nums">
-              {location.currentPrice.toFixed(digits)}
-            </span>
-          </div>
-
-          {/* Below VAL: Seller Exhaustion & Buyer Absorption Visual Banner */}
-          {vaar && (vaar.activeSide === 'LONG_BELOW_VAL' || location.currentPrice <= valueStructure.val + 0.5) && (
-            <div className="relative z-10 px-3 py-1.5 bg-emerald-950/50 border border-emerald-500/40 rounded flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
-              <div className="flex items-center gap-2">
-                <span className="px-1.5 py-0.5 rounded bg-emerald-900 text-emerald-200 text-[10px] font-bold">
-                  SELL ABSORPTION BUBBLE
-                </span>
-                <span className="text-emerald-300 font-bold">
-                  Passive Buyer Wall @ {vaar.defendedLevel.toFixed(digits)}
-                </span>
-                <span className="text-slate-400 text-[11px] hidden sm:inline">
-                  (Aggressive sellers failing to push lower · Failure Point: {vaar.auctionContext.orderFlowEvidence.failurePointPrice.toFixed(digits)})
-                </span>
+                {/* Profile shape badges */}
+                <div className="hidden md:flex items-center gap-1.5 text-[11px] font-mono text-slate-400 pl-1 border-l border-white/10">
+                  <span className="text-slate-400">Profile:</span>
+                  <strong className="text-amber-400 font-bold">{valueStructure.dayProfileShape}</strong>
+                </div>
               </div>
-              <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
-                vaar.auctionContext.isFailedAuctionReversion 
-                  ? 'bg-amber-950 text-amber-300 border border-amber-500/40' 
-                  : 'bg-emerald-900 text-emerald-100'
+            </div>
+
+            {/* 2. PLAIN-ENGLISH BOTTOM LINE VERDICT BANNER (Answers: "What does this mean for me right now?") */}
+            <div className={`p-3 rounded-lg border mb-3.5 transition-all ${statusBadgeBg} ${statusBadgeBorder}`}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-2 mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-500"></span>
+                  </span>
+                  <span className={`text-xs font-bold tracking-wider uppercase px-2 py-0.5 rounded border ${statusBadgeColor} ${statusBadgeBorder} bg-black/40`}>
+                    {statusBadgeText}
+                  </span>
+                </div>
+                <div className="text-xs font-mono font-bold text-white flex items-center gap-1.5">
+                  <span className="text-slate-400 font-normal">Live Price:</span>
+                  <span className="text-cyan-300 text-sm">{curPrice.toFixed(digits)}</span>
+                  <span className="text-slate-500 font-normal">·</span>
+                  <span className="text-slate-300 font-normal">{distPocPips}p from Fair Value</span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <span className="text-cyan-400 text-sm">💡</span>
+                  <span>{statusPlainHeadline}</span>
+                </div>
+                <p className="text-xs text-slate-200 leading-relaxed font-sans">
+                  {statusPlainExplanation}
+                </p>
+                <div className="pt-1 text-xs font-mono font-semibold flex items-center gap-1.5 text-emerald-300">
+                  <span className="text-emerald-400 font-bold">⚡ ACTION:</span>
+                  <span className="text-white">{statusActionRule}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. THREE-LEVEL AUCTION SPECTRUM LADDER (Ceiling ➔ Fair Value ➔ Floor) */}
+            <div className="space-y-2 mb-3.5">
+              <div className="text-[11px] font-mono text-slate-400 uppercase font-semibold flex items-center justify-between px-1">
+                <span>The 3 Auction Levels (Plain English vs Price)</span>
+                <span className="text-cyan-400">Directional Trajectory: {signal.expectedPath.description}</span>
+              </div>
+
+              {/* CEILING (VAH) */}
+              <div className={`p-2.5 rounded-lg border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs transition-all ${
+                isAboveCeiling ? 'bg-rose-950/60 border-rose-500 shadow-md ring-1 ring-rose-500/30' : 'bg-[#10141f] border-[#222f47]'
               }`}>
-                {vaar.auctionContext.isFailedAuctionReversion 
-                  ? 'Low Vol + Absorption → Mean-Reversion' 
-                  : 'Monitoring Acceptance'}
-              </span>
-            </div>
-          )}
+                <div className="flex items-center gap-2.5">
+                  <div className="w-6 h-6 rounded bg-rose-950 text-rose-400 border border-rose-500/40 flex items-center justify-center font-bold text-xs shrink-0">
+                    ▲
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-rose-300">THE EXPENSIVE CEILING (VAH)</span>
+                      <span className="px-1.5 py-0.2 rounded text-[9.5px] font-bold bg-rose-950 text-rose-300 border border-rose-500/30">
+                        Sell Zone / Rejection Area
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Price is considered high here. Institutional sellers take profit and defend this roof.
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="font-mono font-bold text-sm text-rose-300 tabular-nums">{vahPrice.toFixed(digits)}</div>
+                  <div className="text-[10px] font-mono text-slate-400">
+                    {curPrice > vahPrice ? `+${Math.round((curPrice - vahPrice) * pipMultiplier)}p above` : `${Math.round((vahPrice - curPrice) * pipMultiplier)}p above live`}
+                  </div>
+                </div>
+              </div>
 
-          {/* 4. VALUE LOW (VAL) Boundary */}
-          <div className="relative z-10 flex items-center justify-between border-t-2 border-dashed border-amber-500/70 pt-1">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-amber-400 tracking-wider">VALUE LOW (VAL)</span>
-              <span className="text-[11px] text-slate-400 font-mono hidden md:inline">Lower Value Boundary / Defended Support POI</span>
-            </div>
-            <span className="text-xs font-mono font-bold text-amber-300 tabular-nums">
-              {valueStructure.val.toFixed(digits)}
-            </span>
-          </div>
+              {/* ACTIVE LIVE PRICE MARKER IF BETWEEN CEILING & POC */}
+              {!isBelowFloor && !isAboveCeiling && curPrice >= pocPrice && (
+                <div className="px-3 py-2 rounded-lg bg-cyan-950/70 border-2 border-cyan-400 flex items-center justify-between text-xs font-mono shadow-lg shadow-cyan-500/10">
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-400"></span>
+                    </span>
+                    <strong className="text-white">YOU ARE HERE: LIVE PRICE</strong>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-cyan-400 text-black">
+                      {isAtEquilibrium ? 'AT FAIR VALUE' : 'PREMIUM SIDE'}
+                    </span>
+                    <span className="text-slate-300 text-[11px] hidden sm:inline">
+                      ({distPocPips} pips {isAtEquilibrium ? 'at balance' : 'above Fair Value, gravity pulling down'})
+                    </span>
+                  </div>
+                  <span className="text-sm font-black text-cyan-200 tabular-nums">{curPrice.toFixed(digits)}</span>
+                </div>
+              )}
 
-          {/* 5. INVALIDATION LEVEL (Hard Red Boundary) */}
-          <div className="relative z-10 flex items-center justify-between px-3 py-1 bg-red-950/40 border border-red-500/40 rounded text-[11px] font-mono text-red-300">
-            <div className="flex items-center gap-2">
-              <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
-              <span className="font-bold">{invalidation.label}</span>
-              <span className="text-slate-400 text-[10px] hidden md:inline">— {invalidation.condition}</span>
+              {/* FAIR VALUE CENTER (POC - THE MAGNET) */}
+              <div className={`p-2.5 rounded-lg border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs transition-all ${
+                isAtEquilibrium ? 'bg-cyan-950/70 border-cyan-400 shadow-lg ring-1 ring-cyan-400/50' : 'bg-[#0a1829] border-cyan-500/40'
+              }`}>
+                <div className="flex items-center gap-2.5">
+                  <div className="w-6 h-6 rounded bg-cyan-950 text-cyan-300 border border-cyan-500/50 flex items-center justify-center font-bold text-xs shrink-0">
+                    🧲
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-cyan-300">FAIR VALUE CENTER (POC)</span>
+                      <span className="px-1.5 py-0.2 rounded text-[9.5px] font-bold bg-cyan-950 text-cyan-300 border border-cyan-500/30">
+                        The Market Magnet (70% Volume)
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 mt-0.5">
+                      Where most traders traded today. Acts like gravity: when price wanders away, it pulls price back here.
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="font-mono font-bold text-sm text-cyan-300 tabular-nums">{pocPrice.toFixed(digits)}</div>
+                  <div className="text-[10px] font-mono text-cyan-400 font-semibold">
+                    {distPocPips === 0 ? 'Equilibrium' : `${distPocPips}p from Live`}
+                  </div>
+                </div>
+              </div>
+
+              {/* ACTIVE LIVE PRICE MARKER IF BETWEEN POC & FLOOR */}
+              {!isBelowFloor && !isAboveCeiling && curPrice < pocPrice && (
+                <div className="px-3 py-2 rounded-lg bg-cyan-950/70 border-2 border-cyan-400 flex items-center justify-between text-xs font-mono shadow-lg shadow-cyan-500/10">
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-400"></span>
+                    </span>
+                    <strong className="text-white">YOU ARE HERE: LIVE PRICE</strong>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-400 text-black">
+                      DISCOUNT SIDE
+                    </span>
+                    <span className="text-slate-300 text-[11px] hidden sm:inline">
+                      ({distPocPips} pips below Fair Value, gravity pulling upward)
+                    </span>
+                  </div>
+                  <span className="text-sm font-black text-cyan-200 tabular-nums">{curPrice.toFixed(digits)}</span>
+                </div>
+              )}
+
+              {/* ACTIVE LIVE PRICE MARKER IF BELOW FLOOR */}
+              {isBelowFloor && (
+                <div className="px-3 py-2 rounded-lg bg-emerald-950/70 border-2 border-emerald-400 flex items-center justify-between text-xs font-mono shadow-lg shadow-emerald-500/20">
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
+                    </span>
+                    <strong className="text-white">YOU ARE HERE: DEEP DISCOUNT</strong>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-400 text-black">
+                      BELOW FLOOR
+                    </span>
+                    <span className="text-emerald-300 text-[11px] hidden sm:inline">
+                      ({Math.round((valPrice - curPrice) * pipMultiplier)}p below Floor, expecting rubber band bounce back to {pocPrice.toFixed(digits)})
+                    </span>
+                  </div>
+                  <span className="text-sm font-black text-emerald-300 tabular-nums">{curPrice.toFixed(digits)}</span>
+                </div>
+              )}
+
+              {/* FLOOR (VAL) */}
+              <div className={`p-2.5 rounded-lg border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs transition-all ${
+                isBelowFloor ? 'bg-emerald-950/60 border-emerald-500 shadow-md ring-1 ring-emerald-500/30' : 'bg-[#10141f] border-[#222f47]'
+              }`}>
+                <div className="flex items-center gap-2.5">
+                  <div className="w-6 h-6 rounded bg-emerald-950 text-emerald-400 border border-emerald-500/40 flex items-center justify-center font-bold text-xs shrink-0">
+                    ▼
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-emerald-300">THE WHOLESALE FLOOR (VAL)</span>
+                      <span className="px-1.5 py-0.2 rounded text-[9.5px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-500/30">
+                        Buy Zone / Bargain Support
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Price is considered cheap here. Institutional buyers absorb sell orders and defend this floor.
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="font-mono font-bold text-sm text-emerald-300 tabular-nums">{valPrice.toFixed(digits)}</div>
+                  <div className="text-[10px] font-mono text-slate-400">
+                    {curPrice < valPrice ? `-${Math.round((valPrice - curPrice) * pipMultiplier)}p below` : `${Math.round((curPrice - valPrice) * pipMultiplier)}p below live`}
+                  </div>
+                </div>
+              </div>
+
+              {/* Target & Invalidation Summary Pill */}
+              <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded bg-black/40 border border-white/5 text-[11px] font-mono">
+                <div className="flex items-center gap-1.5 text-purple-300">
+                  <Target className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Main Liquidity Target:</span>
+                  <strong className="text-white">{signal.targetTP2.toFixed(digits)}</strong>
+                </div>
+                <div className="flex items-center gap-1.5 text-rose-300">
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Invalidation Stop:</span>
+                  <strong className="text-white">{invalidation.price.toFixed(digits)}</strong>
+                  <span className="text-slate-500 text-[10px] hidden sm:inline">({invalidation.condition})</span>
+                </div>
+              </div>
             </div>
-            <span className="font-bold text-red-200">{invalidation.price.toFixed(digits)}</span>
+
+            {/* 4. EXPANDABLE 10-SECOND CHEAT SHEET (Simple Real-World Analogies) */}
+            {showAuctionGuide && (
+              <div className="p-3 rounded-lg bg-[#070b14] border border-[#1b253b] text-xs space-y-2">
+                <div className="flex items-center justify-between border-b border-white/5 pb-1.5">
+                  <span className="font-bold text-white flex items-center gap-1.5 text-xs">
+                    <span className="text-amber-400">💡</span>
+                    <span>How to Read This in 10 Seconds (Real-Life Analogy)</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">Auction Market Theory</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 pt-1 text-[11px] leading-relaxed">
+                  <div className="p-2 rounded bg-[#0e1422] border border-rose-500/20">
+                    <div className="font-bold text-rose-300 mb-1 flex items-center gap-1">
+                      <span>🏰 The Ceiling (VAH)</span>
+                    </div>
+                    <p className="text-slate-300">
+                      Think of this as the top of today's normal room. When price reaches here, it is <strong>expensive</strong>. Smart traders do NOT buy here. Sellers look to short and drive price back down.
+                    </p>
+                  </div>
+
+                  <div className="p-2 rounded bg-[#0e1422] border border-cyan-500/20">
+                    <div className="font-bold text-cyan-300 mb-1 flex items-center gap-1">
+                      <span>🧲 The Magnet (POC)</span>
+                    </div>
+                    <p className="text-slate-300">
+                      Think of this as <strong>gravity</strong>. It's the fair price where most buyers and sellers met today. When price stretches too far up or down, it snaps back here like a rubber band.
+                    </p>
+                  </div>
+
+                  <div className="p-2 rounded bg-[#0e1422] border border-emerald-500/20">
+                    <div className="font-bold text-emerald-300 mb-1 flex items-center gap-1">
+                      <span>🛡️ The Floor (VAL)</span>
+                    </div>
+                    <p className="text-slate-300">
+                      Think of this as the bottom of today's normal room. When price reaches here, it is on <strong>wholesale discount</strong>. Smart traders do NOT sell here. Buyers look to purchase bargains and push price back up.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* ========================================================
           ADD-ON: VALUE AREA ABSORPTION & RECLAIM INTELLIGENCE LAYER

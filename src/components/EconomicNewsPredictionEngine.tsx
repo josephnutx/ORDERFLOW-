@@ -15,7 +15,6 @@ import {
   Layers,
   Search,
   CheckCircle2,
-  History,
   ChevronDown,
   ChevronUp,
   Globe,
@@ -23,7 +22,8 @@ import {
   ArrowUpRight,
   ShieldCheck,
   Radio,
-  FileText
+  Compass,
+  ArrowRight
 } from 'lucide-react';
 import { 
   MacroReleaseType, 
@@ -38,6 +38,8 @@ import {
 import { SniperModelOutput } from '../types/sniperModel';
 import { MarketAnalysisNote } from '../services/marketNewsService';
 import { tradingVoice } from '../services/tradingVoiceService';
+import { getDstInfo } from '../services/marketHoursService';
+import { INSTRUMENTS } from '../services/mockDataGenerator';
 
 interface EconomicNewsPredictionEngineProps {
   currentSymbol: string;
@@ -72,6 +74,10 @@ export const EconomicNewsPredictionEngine: React.FC<EconomicNewsPredictionEngine
   // User's detected local timezone and live clock
   const [userTimeZone, setUserTimeZone] = useState<string>('');
   const [userLocalClock, setUserLocalClock] = useState<string>('');
+
+  // Real-time Daylight Saving Time (DST) calibration
+  const dstInfo = useMemo(() => getDstInfo(), []);
+  const currentInst = INSTRUMENTS[currentSymbol] || INSTRUMENTS.XAUUSD;
 
   useEffect(() => {
     try {
@@ -122,7 +128,7 @@ export const EconomicNewsPredictionEngine: React.FC<EconomicNewsPredictionEngine
     return () => clearInterval(interval);
   }, [fetchLiveCalendar]);
 
-  // Generate upcoming predictions
+  // Generate upcoming predictions tailored specifically to currentSymbol
   const predictions = useMemo(() => {
     return generateCuratedPredictions(currentSymbol, modelOutput, digits, liveEvents);
   }, [currentSymbol, modelOutput, digits, liveEvents]);
@@ -139,7 +145,8 @@ export const EconomicNewsPredictionEngine: React.FC<EconomicNewsPredictionEngine
       const matchesSearch = !searchQuery || 
         p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.finalPrediction.verdictCall.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.category.toLowerCase().includes(searchQuery.toLowerCase());
+        p.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.pairSpecificImpact.impactBadge.toLowerCase().includes(searchQuery.toLowerCase());
       return matchesCat && matchesSearch;
     });
   }, [predictions, selectedCategory, searchQuery]);
@@ -166,32 +173,37 @@ export const EconomicNewsPredictionEngine: React.FC<EconomicNewsPredictionEngine
 
   const handleCopyPrediction = (pred: EconomicNewsPrediction) => {
     const localTime = formatToLocalTime(pred.eventTime);
+    const pi = pred.pairSpecificImpact;
     const text = `=====================================================
 MACRO INTELLIGENCE REPORT: ${pred.title}
-Asset: ${currentSymbol} | Impact: ${pred.impact}
+Active Pair: ${currentSymbol} (${pi.symbolFullName})
+Pair Impact: ${pi.impactBadge} (${pi.expectedExcursionDisplay})
 Countdown: ${pred.countdownFormatted} (${localTime.fullLocalDisplay})
 =====================================================
 
-1. CONSENSUS & BENCHMARKS:
+1. HOW THIS NEWS AFFECTS ${currentSymbol}:
+• Currency Transmission: ${pi.roleExplanation}
+• Mechanism: ${pi.transmissionMechanics}
+
+2. CONSENSUS & BENCHMARKS:
 • Expected: ${pred.newsPrediction.consensusValue} (Prior: ${pred.newsPrediction.previousValue})
 • Desk Whisper: ${pred.newsPrediction.whisperNumber}
 • Bank Range: ${pred.newsPrediction.bankConsensusRange}
 
-2. ORDER FLOW & POSITIONING:
+3. ORDER FLOW & POSITIONING ON ${currentSymbol}:
 • Order Flow: ${pred.modelMarketObservations.orderFlowState}
 • Resting Liquidity: ${pred.modelMarketObservations.restingLiquidity}
 • CVD/Delta: ${pred.modelMarketObservations.cvdDeltaState}
-• Pricing Status: ${pred.assessmentWithNews.pricingStatus.replace(/_/g, ' ')}
 • Trap Warning: ${pred.assessmentWithNews.trapWarning}
 
-3. MODEL VERDICT & EXPECTED ACTION:
-• Call: ${pred.finalPrediction.verdictCall} (${pred.finalPrediction.confidenceScore}% confidence)
-• Expected Path: ${pred.finalPrediction.expectedPriceAction}
-
-4. 2-PHASE EXECUTION PLAYBOOK:
-• Phase 1 (0-90s): ${pred.twoPhaseMovePrediction?.phase1KneeJerk.direction.replace(/_/g, ' ')} (${pred.twoPhaseMovePrediction?.phase1KneeJerk.duration}) - ${pred.twoPhaseMovePrediction?.phase1KneeJerk.expectedAction}
-• Phase 2 (2-35m): ${pred.twoPhaseMovePrediction?.phase2TrueMacroMove.direction.replace(/_/g, ' ')} (${pred.twoPhaseMovePrediction?.phase2TrueMacroMove.duration}) - ${pred.twoPhaseMovePrediction?.phase2TrueMacroMove.expectedAction}
-• Action Playbook: ${pred.twoPhaseMovePrediction?.theRightActualMovePlaybook.verdictSummary} (${pred.twoPhaseMovePrediction?.theRightActualMovePlaybook.timingAdvice})
+4. 2-PHASE EXECUTION PLAYBOOK FOR ${currentSymbol}:
+• Phase 1 (0-90s Stop-Hunt): ${pi.phase1KneeJerk.direction.replace(/_/g, ' ')} -> ${pi.phase1KneeJerk.targetPriceStr} (${pi.phase1KneeJerk.levelName})
+  Details: ${pi.phase1KneeJerk.expectedAction}
+  Warning: ${pi.phase1KneeJerk.trapWarning}
+• Phase 2 (2-35m True Move): ${pi.phase2TrueMacroMove.direction.replace(/_/g, ' ')} -> ${pi.phase2TrueMacroMove.targetPriceStr} (${pi.phase2TrueMacroMove.levelName})
+  Details: ${pi.phase2TrueMacroMove.expectedAction}
+• Direct Action: ${pi.rightActualMovePlaybook.verdictSummary}
+• Timing Rule: ${pi.rightActualMovePlaybook.timingAdvice}
 =====================================================`;
 
     navigator.clipboard.writeText(text);
@@ -207,29 +219,63 @@ Countdown: ${pred.countdownFormatted} (${localTime.fullLocalDisplay})
     }
 
     const localTime = formatToLocalTime(pred.eventTime);
-    const script = `Macro intelligence for ${pred.title}. Scheduled in ${pred.countdownFormatted}, at ${localTime.timeStr} local time. Consensus is ${pred.newsPrediction.consensusValue}. Order flow indicates ${pred.modelMarketObservations.orderFlowState}. Model forecast: ${pred.finalPrediction.verdictCall}, with ${pred.finalPrediction.confidenceScore} percent confidence. Expecting ${pred.finalPrediction.expectedPriceAction}.`;
+    const pi = pred.pairSpecificImpact;
+    const script = `Macro catalyst update for ${pred.title}. On ${currentSymbol}, model prediction is ${pi.impactBadge}, with expected move of ${pi.expectedExcursionDisplay}. ${pi.transmissionMechanics} In phase one, expect an initial fakeout toward ${pi.phase1KneeJerk.targetPriceStr}. Phase two will initiate the true macro expansion toward ${pi.phase2TrueMacroMove.targetPriceStr}. Recommendation: ${pi.rightActualMovePlaybook.verdictSummary}.`;
 
     setSpeakingId(pred.id);
     tradingVoice.speak(script, { force: true, priority: true });
     setTimeout(() => {
       setSpeakingId(null);
-    }, 9000);
+    }, 11000);
   };
 
   const handleAddPredictionToNotes = (pred: EconomicNewsPrediction) => {
     if (!onAddNoteToAnalysis) return;
     const localTime = formatToLocalTime(pred.eventTime);
+    const pi = pred.pairSpecificImpact;
     onAddNoteToAnalysis({
       id: pred.id,
       symbol: currentSymbol,
-      title: `${pred.category}: ${pred.finalPrediction.verdictCall}`,
+      title: `${pred.category} on ${currentSymbol}: ${pi.impactBadge}`,
       type: 'NEWS_CATALYST',
-      detail: `Consensus: ${pred.newsPrediction.consensusValue} (${localTime.timeStr}). Bias: ${pred.finalPrediction.directionalBias} (${pred.finalPrediction.confidenceScore}%). ${pred.finalPrediction.expectedPriceAction}`,
+      detail: `${pi.expectedExcursionDisplay} expected. ${pi.transmissionMechanics} Playbook: ${pi.rightActualMovePlaybook.verdictSummary}`,
       impact: pred.impact === 'CRITICAL' ? 'HIGH' : pred.impact,
-      sentiment: pred.finalPrediction.directionalBias.includes('BULLISH') ? 'BULLISH' : 'BEARISH',
+      sentiment: pi.directionalBias.includes('BULLISH') ? 'BULLISH' : 'BEARISH',
       addedAt: Date.now(),
     });
   };
+
+  // Quick summary of how the current pair reacts to USD news
+  const pairTransmissionTag = useMemo(() => {
+    if (currentInst.type === 'metals') {
+      return {
+        label: 'Hard Asset · Inversely Correlated with Real Yields & DXY',
+        color: 'text-amber-300 bg-amber-950/40 border-amber-800/50',
+      };
+    }
+    if (currentInst.type === 'crypto') {
+      return {
+        label: 'Digital Liquidity · High Beta Sensitivity to Global M2',
+        color: 'text-cyan-300 bg-cyan-950/40 border-cyan-800/50',
+      };
+    }
+    if (currentInst.type === 'indices') {
+      return {
+        label: 'Equity Multiples · Inversely Sensitive to Discount Rates',
+        color: 'text-indigo-300 bg-indigo-950/40 border-indigo-800/50',
+      };
+    }
+    if (currentSymbol.startsWith('USD')) {
+      return {
+        label: 'USD is Base Currency · Dollar Weakness = Pair Plummets (Direct)',
+        color: 'text-rose-300 bg-rose-950/40 border-rose-800/50',
+      };
+    }
+    return {
+      label: 'USD is Quote Currency · Dollar Weakness = Pair Rallies (Inverted)',
+      color: 'text-emerald-300 bg-emerald-950/40 border-emerald-800/50',
+    };
+  }, [currentSymbol, currentInst.type]);
 
   return (
     <div className="bg-[#0b0f19] border border-[#1b253b] rounded-xl overflow-hidden shadow-2xl">
@@ -310,6 +356,30 @@ Countdown: ${pred.countdownFormatted} (${localTime.fullLocalDisplay})
         </div>
       </div>
 
+      {/* Real-time Pair Transmission & Daylight Saving Time (DST) Intelligence Strip */}
+      <div className="px-4 py-2 bg-[#090e1b] border-b border-[#162137] flex flex-wrap items-center justify-between gap-2.5 text-xs font-mono">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="flex items-center gap-1.5 text-slate-400 text-[11px] font-semibold">
+            <Compass className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Active Pair Transmission:</span>
+          </span>
+          <span className={`px-2 py-0.5 rounded text-[11px] font-bold border ${pairTransmissionTag.color}`}>
+            {currentSymbol} · {pairTransmissionTag.label}
+          </span>
+        </div>
+
+        {/* Daylight Saving Time Notice */}
+        <div className="flex items-center gap-2 text-[11px] text-slate-400">
+          <span className="flex items-center gap-1 text-amber-300 font-bold">
+            <Clock className="w-3 h-3 text-amber-400" />
+            <span>DST Status:</span>
+          </span>
+          <span className="px-2 py-0.5 rounded bg-[#101728] text-slate-200 border border-[#1e2a44]">
+            {dstInfo.activePolicyNote}
+          </span>
+        </div>
+      </div>
+
       {activeTab === 'UPCOMING' ? (
         <div className="p-3.5 space-y-2.5">
           {filteredPredictions.length === 0 ? (
@@ -322,8 +392,9 @@ Countdown: ${pred.countdownFormatted} (${localTime.fullLocalDisplay})
               const isExpanded = Boolean(expandedCardIds[pred.id]);
               const localTime = formatToLocalTime(pred.eventTime);
               const isSelectedNote = selectedAnalysisNotes.some((n) => n.id === pred.id);
-              const isBullish = pred.finalPrediction.directionalBias.includes('BULL');
-              const isBearish = pred.finalPrediction.directionalBias.includes('BEAR');
+              const pi = pred.pairSpecificImpact;
+              const isBullish = pi.directionalBias.includes('BULL');
+              const isBearish = pi.directionalBias.includes('BEAR');
 
               return (
                 <div
@@ -382,21 +453,21 @@ Countdown: ${pred.countdownFormatted} (${localTime.fullLocalDisplay})
                       </span>
                     </div>
 
-                    {/* Right: Model Bias & Quick Actions */}
+                    {/* Right: Dynamic Model Bias for THIS Active Pair & Quick Actions */}
                     <div className="flex items-center gap-2 self-end md:self-center flex-shrink-0">
-                      {/* Directional Bias Pill */}
+                      {/* Directional Bias Pill Tailored to currentSymbol */}
                       <div
                         className={`px-2.5 py-1 rounded text-xs font-mono font-bold flex items-center gap-1.5 border ${
                           isBullish
-                            ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/50'
+                            ? 'bg-emerald-950/70 text-emerald-300 border-emerald-600/60 shadow-xs shadow-emerald-500/20'
                             : isBearish
-                            ? 'bg-rose-950/60 text-rose-300 border-rose-700/50'
-                            : 'bg-indigo-950/60 text-indigo-300 border-indigo-700/50'
+                            ? 'bg-rose-950/70 text-rose-300 border-rose-600/60 shadow-xs shadow-rose-500/20'
+                            : 'bg-indigo-950/70 text-indigo-300 border-indigo-600/60'
                         }`}
                       >
                         {isBullish ? <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> : <TrendingDown className="w-3.5 h-3.5 text-rose-400" />}
-                        <span>{pred.finalPrediction.verdictCall}</span>
-                        <span className="text-[10px] text-slate-400">({pred.finalPrediction.confidenceScore}%)</span>
+                        <span>{pi.impactBadge}</span>
+                        <span className="text-[10px] text-slate-300 font-normal">({pi.expectedExcursionDisplay})</span>
                       </div>
 
                       {/* Audio Briefing */}
@@ -410,7 +481,7 @@ Countdown: ${pred.countdownFormatted} (${localTime.fullLocalDisplay})
                             ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
                             : 'bg-[#121a2c] hover:bg-[#19243c] text-slate-300 border-[#202c46]'
                         }`}
-                        title="Listen to briefing"
+                        title="Listen to pair-specific briefing"
                       >
                         <Volume2 className={`w-3.5 h-3.5 ${speakingId === pred.id ? 'animate-pulse text-amber-400' : ''}`} />
                       </button>
@@ -422,7 +493,7 @@ Countdown: ${pred.countdownFormatted} (${localTime.fullLocalDisplay})
                           handleCopyPrediction(pred);
                         }}
                         className="p-1.5 rounded bg-[#121a2c] hover:bg-[#19243c] border border-[#202c46] text-slate-300 text-xs transition-colors"
-                        title="Copy report"
+                        title="Copy pair report"
                       >
                         {copiedId === pred.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                       </button>
@@ -453,29 +524,55 @@ Countdown: ${pred.countdownFormatted} (${localTime.fullLocalDisplay})
                     </div>
                   </div>
 
-                  {/* Summary Bar when Collapsed (Institutional Execution Path) */}
-                  {!isExpanded && pred.twoPhaseMovePrediction && (
+                  {/* Summary Bar when Collapsed (Institutional Execution Path specifically for currentSymbol) */}
+                  {!isExpanded && (
                     <div className="px-3 pb-2.5 pt-0 flex flex-wrap items-center gap-2 text-[11px] font-mono border-t border-[#141d30]/60 mt-1 pt-2">
-                      <span className="text-slate-400 flex items-center gap-1 font-semibold">
-                        2-Phase Path:
+                      <span className="text-cyan-400 flex items-center gap-1 font-bold">
+                        {currentSymbol} 2-Phase Path:
                       </span>
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-950/40 text-rose-300 border border-rose-900/40">
-                        <ArrowDownRight className="w-3 h-3 text-rose-400" />
-                        Ph.1 Sweep: {pred.twoPhaseMovePrediction.phase1KneeJerk.direction.replace(/_/g, ' ')} ({pred.twoPhaseMovePrediction.phase1KneeJerk.duration})
+                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded ${
+                        pi.phase1KneeJerk.direction.includes('BEAR')
+                          ? 'bg-rose-950/40 text-rose-300 border border-rose-900/40'
+                          : 'bg-emerald-950/40 text-emerald-300 border border-emerald-900/40'
+                      }`}>
+                        {pi.phase1KneeJerk.direction.includes('BEAR') ? <ArrowDownRight className="w-3 h-3 text-rose-400" /> : <ArrowUpRight className="w-3 h-3 text-emerald-400" />}
+                        Ph.1 Sweep: {pi.phase1KneeJerk.direction.replace(/_/g, ' ')} &rarr; {pi.phase1KneeJerk.targetPriceStr}
                       </span>
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-950/40 text-emerald-300 border border-emerald-900/40">
-                        <ArrowUpRight className="w-3 h-3 text-emerald-400" />
-                        Ph.2 Trend: {pred.twoPhaseMovePrediction.phase2TrueMacroMove.direction.replace(/_/g, ' ')} ({pred.twoPhaseMovePrediction.phase2TrueMacroMove.duration})
+                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded ${
+                        pi.phase2TrueMacroMove.direction.includes('BULL')
+                          ? 'bg-emerald-950/40 text-emerald-300 border border-emerald-900/40'
+                          : 'bg-rose-950/40 text-rose-300 border border-rose-900/40'
+                      }`}>
+                        {pi.phase2TrueMacroMove.direction.includes('BULL') ? <ArrowUpRight className="w-3 h-3 text-emerald-400" /> : <ArrowDownRight className="w-3 h-3 text-rose-400" />}
+                        Ph.2 Trend: {pi.phase2TrueMacroMove.direction.replace(/_/g, ' ')} &rarr; {pi.phase2TrueMacroMove.targetPriceStr}
                       </span>
-                      <span className="text-amber-300/90 font-medium ml-auto hidden md:inline">
-                        Playbook: {pred.twoPhaseMovePrediction.theRightActualMovePlaybook.verdictSummary}
+                      <span className="text-amber-300/90 font-medium ml-auto hidden md:inline truncate max-w-md">
+                        {pi.rightActualMovePlaybook.verdictSummary}
                       </span>
                     </div>
                   )}
 
-                  {/* EXPANDED VIEW: Clean 3-Column Institutional Synthesis Matrix */}
+                  {/* EXPANDED VIEW: Complete Pair-Specific Institutional Playbook */}
                   {isExpanded && (
                     <div className="p-4 border-t border-[#1e2a44] bg-[#070b14] space-y-3.5 text-xs">
+                      {/* Pair Transmission Banner */}
+                      <div className="p-2.5 rounded-lg bg-[#0e1628] border border-cyan-800/40 flex flex-col md:flex-row md:items-center justify-between gap-2 font-mono text-[11px]">
+                        <div>
+                          <span className="text-cyan-400 font-bold uppercase tracking-wider block">
+                            Direct Transmission on {currentSymbol} ({pi.symbolFullName})
+                          </span>
+                          <span className="text-slate-300 mt-0.5 block">
+                            {pi.transmissionMechanics}
+                          </span>
+                        </div>
+                        <div className="shrink-0 flex items-center gap-2">
+                          <span className="text-slate-400">Expected Excursion:</span>
+                          <span className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 font-bold border border-cyan-800">
+                            {pi.expectedExcursionDisplay}
+                          </span>
+                        </div>
+                      </div>
+
                       {/* 3 Pillars Grid */}
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                         {/* Pillar 1: Consensus & Macro Drivers */}
@@ -522,18 +619,18 @@ Countdown: ${pred.countdownFormatted} (${localTime.fullLocalDisplay})
                           </div>
                         </div>
 
-                        {/* Pillar 2: Order Flow & Liquidity Positioning */}
+                        {/* Pillar 2: Order Flow & Liquidity Positioning on currentSymbol */}
                         <div className="p-3 rounded-lg bg-[#0c1220] border border-[#1b253b] flex flex-col justify-between">
                           <div>
                             <div className="flex items-center justify-between text-cyan-400 font-mono font-bold text-[11px] uppercase tracking-wider pb-1.5 border-b border-[#182339] mb-2">
                               <span className="flex items-center gap-1.5">
                                 <Activity className="w-3.5 h-3.5" />
-                                Market Positioning ({currentSymbol})
+                                {currentSymbol} Market Positioning
                               </span>
                             </div>
                             <div className="space-y-1.5 font-mono text-[11px]">
                               <div>
-                                <span className="text-slate-400 block text-[10px]">Order Flow:</span>
+                                <span className="text-slate-400 block text-[10px]">Order Flow on {currentSymbol}:</span>
                                 <span className="text-slate-200">{pred.modelMarketObservations.orderFlowState}</span>
                               </div>
                               <div>
@@ -561,80 +658,111 @@ Countdown: ${pred.countdownFormatted} (${localTime.fullLocalDisplay})
                           )}
                         </div>
 
-                        {/* Pillar 3: 2-Phase Tactical Sequence & Playbook */}
-                        {pred.twoPhaseMovePrediction && (
-                          <div className="p-3 rounded-lg bg-[#0c1220] border border-[#1b253b] flex flex-col justify-between">
-                            <div>
-                              <div className="flex items-center justify-between text-emerald-400 font-mono font-bold text-[11px] uppercase tracking-wider pb-1.5 border-b border-[#182339] mb-2">
-                                <span className="flex items-center gap-1.5">
-                                  <Layers className="w-3.5 h-3.5" />
-                                  2-Phase Tactical Playbook
-                                </span>
-                              </div>
-
-                              <div className="space-y-2">
-                                <div className="p-2 rounded bg-rose-950/30 border border-rose-900/40">
-                                  <div className="text-[10px] font-mono font-bold text-rose-300 uppercase flex items-center justify-between">
-                                    <span>Phase 1 (Sweep)</span>
-                                    <span>{pred.twoPhaseMovePrediction.phase1KneeJerk.duration}</span>
-                                  </div>
-                                  <div className="text-slate-300 text-[11px] mt-0.5">
-                                    {pred.twoPhaseMovePrediction.phase1KneeJerk.expectedAction}
-                                  </div>
-                                </div>
-
-                                <div className="p-2 rounded bg-emerald-950/30 border border-emerald-900/40">
-                                  <div className="text-[10px] font-mono font-bold text-emerald-300 uppercase flex items-center justify-between">
-                                    <span>Phase 2 (True Move)</span>
-                                    <span>{pred.twoPhaseMovePrediction.phase2TrueMacroMove.duration}</span>
-                                  </div>
-                                  <div className="text-slate-300 text-[11px] mt-0.5">
-                                    {pred.twoPhaseMovePrediction.phase2TrueMacroMove.expectedAction}
-                                  </div>
-                                </div>
-                              </div>
+                        {/* Pillar 3: 2-Phase Sequence for currentSymbol */}
+                        <div className="p-3 rounded-lg bg-[#0c1220] border border-[#1b253b] flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between text-emerald-400 font-mono font-bold text-[11px] uppercase tracking-wider pb-1.5 border-b border-[#182339] mb-2">
+                              <span className="flex items-center gap-1.5">
+                                <Layers className="w-3.5 h-3.5" />
+                                {currentSymbol} 2-Phase Playbook
+                              </span>
                             </div>
 
-                            <div className="mt-2.5 pt-2 border-t border-[#182339] font-mono text-[11px]">
-                              <span className="text-amber-400 font-bold block text-[10px] uppercase">
-                                Action Verdict:
-                              </span>
-                              <span className="text-white font-semibold">
-                                {pred.twoPhaseMovePrediction.theRightActualMovePlaybook.verdictSummary}
-                              </span>
-                              <div className="text-slate-400 text-[10px] mt-0.5">
-                                ⏱️ {pred.twoPhaseMovePrediction.theRightActualMovePlaybook.timingAdvice}
+                            <div className="space-y-2">
+                              {/* Phase 1 */}
+                              <div className={`p-2 rounded border ${
+                                pi.phase1KneeJerk.direction.includes('BEAR')
+                                  ? 'bg-rose-950/30 border-rose-900/40'
+                                  : 'bg-emerald-950/30 border-emerald-900/40'
+                              }`}>
+                                <div className={`text-[10px] font-mono font-bold uppercase flex items-center justify-between ${
+                                  pi.phase1KneeJerk.direction.includes('BEAR') ? 'text-rose-300' : 'text-emerald-300'
+                                }`}>
+                                  <span>Phase 1 (Stop Sweep) &rarr; {pi.phase1KneeJerk.targetPriceStr}</span>
+                                  <span>{pi.phase1KneeJerk.duration}</span>
+                                </div>
+                                <div className="text-slate-300 text-[11px] mt-0.5">
+                                  {pi.phase1KneeJerk.expectedAction}
+                                </div>
+                                <div className="text-amber-400/90 text-[10px] mt-1 font-mono">
+                                  ⚠️ {pi.phase1KneeJerk.trapWarning}
+                                </div>
+                              </div>
+
+                              {/* Phase 2 */}
+                              <div className={`p-2 rounded border ${
+                                pi.phase2TrueMacroMove.direction.includes('BULL')
+                                  ? 'bg-emerald-950/30 border-emerald-900/40'
+                                  : 'bg-rose-950/30 border-rose-900/40'
+                              }`}>
+                                <div className={`text-[10px] font-mono font-bold uppercase flex items-center justify-between ${
+                                  pi.phase2TrueMacroMove.direction.includes('BULL') ? 'text-emerald-300' : 'text-rose-300'
+                                }`}>
+                                  <span>Phase 2 (True Macro Trend) &rarr; {pi.phase2TrueMacroMove.targetPriceStr}</span>
+                                  <span>{pi.phase2TrueMacroMove.duration}</span>
+                                </div>
+                                <div className="text-slate-300 text-[11px] mt-0.5">
+                                  {pi.phase2TrueMacroMove.expectedAction}
+                                </div>
                               </div>
                             </div>
                           </div>
-                        )}
-                      </div>
 
-                      {/* Scenario Sensitivity Matrix (Hot vs In-Line vs Cool) */}
-                      {pred.assessmentWithNews.scenarioMatrix && (
-                        <div className="p-2.5 rounded-lg bg-[#090e1a] border border-[#172136]">
-                          <div className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-2">
-                            Scenario Sensitivity Matrix
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
-                            <div className="p-2 rounded bg-rose-950/20 border border-rose-900/30">
-                              <span className="text-rose-400 font-mono font-bold block text-[10px]">HOT PRINT</span>
-                              <span className="text-slate-400 text-[10px] block">{pred.assessmentWithNews.scenarioMatrix.hot.trigger}</span>
-                              <span className="text-slate-200 mt-0.5 block">{pred.assessmentWithNews.scenarioMatrix.hot.reaction}</span>
-                            </div>
-                            <div className="p-2 rounded bg-indigo-950/20 border border-indigo-900/30">
-                              <span className="text-indigo-300 font-mono font-bold block text-[10px]">IN-LINE PRINT</span>
-                              <span className="text-slate-400 text-[10px] block">{pred.assessmentWithNews.scenarioMatrix.inLine.trigger}</span>
-                              <span className="text-slate-200 mt-0.5 block">{pred.assessmentWithNews.scenarioMatrix.inLine.reaction}</span>
-                            </div>
-                            <div className="p-2 rounded bg-emerald-950/20 border border-emerald-900/30">
-                              <span className="text-emerald-400 font-mono font-bold block text-[10px]">COOL PRINT</span>
-                              <span className="text-slate-400 text-[10px] block">{pred.assessmentWithNews.scenarioMatrix.cool.trigger}</span>
-                              <span className="text-slate-200 mt-0.5 block">{pred.assessmentWithNews.scenarioMatrix.cool.reaction}</span>
+                          <div className="mt-2.5 pt-2 border-t border-[#182339] font-mono text-[11px]">
+                            <span className="text-amber-400 font-bold block text-[10px] uppercase">
+                              Action Verdict for {currentSymbol}:
+                            </span>
+                            <span className="text-white font-semibold">
+                              {pi.rightActualMovePlaybook.verdictSummary}
+                            </span>
+                            <div className="text-slate-400 text-[10px] mt-0.5">
+                              ⏱️ {pi.rightActualMovePlaybook.timingAdvice}
                             </div>
                           </div>
                         </div>
-                      )}
+                      </div>
+
+                      {/* Scenario Sensitivity Matrix for currentSymbol */}
+                      <div className="p-2.5 rounded-lg bg-[#090e1a] border border-[#172136]">
+                        <div className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+                          <span>{currentSymbol} Scenario Sensitivity Matrix</span>
+                          <span className="text-slate-500 font-normal">Calculated for {pi.symbolFullName}</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+                          <div className={`p-2 rounded border ${
+                            pi.scenarioMatrix.hot.bias.includes('BEAR')
+                              ? 'bg-rose-950/20 border-rose-900/30'
+                              : 'bg-emerald-950/20 border-emerald-900/30'
+                          }`}>
+                            <span className="text-amber-400 font-mono font-bold block text-[10px]">
+                              {pi.scenarioMatrix.hot.trigger}
+                            </span>
+                            <span className="text-slate-200 mt-1 block font-mono">
+                              {pi.scenarioMatrix.hot.reaction}
+                            </span>
+                          </div>
+                          <div className="p-2 rounded bg-indigo-950/20 border border-indigo-900/30">
+                            <span className="text-indigo-300 font-mono font-bold block text-[10px]">
+                              {pi.scenarioMatrix.inLine.trigger}
+                            </span>
+                            <span className="text-slate-200 mt-1 block font-mono">
+                              {pi.scenarioMatrix.inLine.reaction}
+                            </span>
+                          </div>
+                          <div className={`p-2 rounded border ${
+                            pi.scenarioMatrix.cool.bias.includes('BULL')
+                              ? 'bg-emerald-950/20 border-emerald-900/30'
+                              : 'bg-rose-950/20 border-rose-900/30'
+                          }`}>
+                            <span className="text-cyan-400 font-mono font-bold block text-[10px]">
+                              {pi.scenarioMatrix.cool.trigger}
+                            </span>
+                            <span className="text-slate-200 mt-1 block font-mono">
+                              {pi.scenarioMatrix.cool.reaction}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>

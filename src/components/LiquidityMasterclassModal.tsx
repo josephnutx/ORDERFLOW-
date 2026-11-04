@@ -29,16 +29,14 @@ import { tradingVoice } from '../services/tradingVoiceService';
 interface LiquidityMasterclassModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onApplyDeepTone?: () => void;
 }
 
 export const LiquidityMasterclassModal: React.FC<LiquidityMasterclassModalProps> = ({
   isOpen,
   onClose,
-  onApplyDeepTone,
 }) => {
   const [activeTab, setActiveTab] = useState<
-    'core_dynamics' | 'heatmaps_vs_orderbook' | 'patterns_playbook' | 'deep_tone' | 'news_context'
+    'core_dynamics' | 'heatmaps_vs_orderbook' | 'patterns_playbook' | 'viridis_palette' | 'news_context'
   >('core_dynamics');
 
   const [activePattern, setActivePattern] = useState<'reloads' | 'icebergs' | 'sweeps' | 'flips' | 'least_resistance' | 'spoofing'>('icebergs');
@@ -137,15 +135,15 @@ export const LiquidityMasterclassModal: React.FC<LiquidityMasterclassModalProps>
           </button>
 
           <button
-            onClick={() => setActiveTab('deep_tone')}
+            onClick={() => setActiveTab('viridis_palette')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all shrink-0 cursor-pointer ${
-              activeTab === 'deep_tone'
-                ? 'bg-purple-500 text-black font-bold shadow-md shadow-purple-950/80'
+              activeTab === 'viridis_palette'
+                ? 'bg-amber-400 text-black font-bold shadow-md shadow-amber-950/80'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-[#121c2e]'
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span>4. Scalper Heat Map Tuning (Deep Tone)</span>
+            <span>4. Viridis Heat Map Calibration (Locked Standard)</span>
           </button>
 
           <button
@@ -524,22 +522,22 @@ export const LiquidityMasterclassModal: React.FC<LiquidityMasterclassModalProps>
             </div>
           )}
 
-          {/* TAB 4: DEEP TONE HEAT MAP TUNING */}
-          {activeTab === 'deep_tone' && (
+          {/* TAB 4: VIRIDIS HEAT MAP CALIBRATION (LOCKED INSTITUTIONAL STANDARD) */}
+          {activeTab === 'viridis_palette' && (
             <div className="space-y-5 animate-in fade-in duration-150">
-              <div className="p-4 rounded-xl bg-gradient-to-r from-[#0d1627] to-[#20102b] border border-purple-500/30">
+              <div className="p-4 rounded-xl bg-gradient-to-r from-[#0d1627] to-[#1a1230] border border-amber-500/30">
                 <div className="flex items-start gap-3">
-                  <div className="p-2 rounded-lg bg-purple-500/20 text-purple-300 shrink-0">
-                    <Sliders className="w-5 h-5 text-purple-400" />
+                  <div className="p-2 rounded-lg bg-amber-500/20 text-amber-300 shrink-0">
+                    <Sliders className="w-5 h-5 text-amber-400" />
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-white mb-1">
-                      Platform Customization: The "Deep Tone" Scalper Configuration
+                      Institutional Standard: The Locked "Viridis" Order Flow Palette
                     </h3>
                     <p className="text-slate-300 leading-relaxed">
-                      Professional tournament traders and high-intensity scalpers look at the screen for 6 to 8 hours daily. 
-                      Standard rainbow palettes cause severe eye fatigue and visual noise from tiny retail micro-orders. 
-                      The <strong>Deep Tone</strong> scheme utilizes ultra-dark charcoal backgrounds, muted steel teals for normal depth, and reserves electric amber and crimson strictly for massive institutional resting walls.
+                      Professional order flow execution relies on <strong>perceptually uniform color mapping</strong>. 
+                      Standard rainbow palettes create artificial borders where brightness fluctuates erratically. 
+                      The locked <strong>Viridis (Bookmap Standard)</strong> palette ensures monotonic luminance progression: deep dark purple denotes low-volume void, transitioning smoothly through indigo, cyan-teal, and lime, into neon gold for massive institutional resting walls.
                     </p>
                   </div>
                 </div>
@@ -548,28 +546,20 @@ export const LiquidityMasterclassModal: React.FC<LiquidityMasterclassModalProps>
               {/* Palette Demo Strip */}
               <div className="p-4 rounded-xl bg-[#090d16] border border-[#1b263d] space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-white text-xs">Deep Tone Visual Gradient Preview</span>
-                  {onApplyDeepTone && (
-                    <button
-                      onClick={() => {
-                        onApplyDeepTone();
-                        onClose();
-                      }}
-                      className="px-3 py-1 rounded text-xs font-mono font-bold bg-gradient-to-r from-purple-500 to-amber-500 text-black hover:brightness-110 transition-all cursor-pointer shadow-md"
-                    >
-                      ⚡ Apply Deep Tone to Heat Map Now
-                    </button>
-                  )}
+                  <span className="font-bold text-white text-xs">Viridis Luminance Scale Preview (Locked)</span>
+                  <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-950/80 text-amber-300 border border-amber-600/40">
+                    Active Heatmap Standard
+                  </span>
                 </div>
                 <div
                   className="w-full h-8 rounded-lg shadow-inner border border-white/10"
-                  style={{ background: PALETTES.deep_tone.getCssGradient() }}
+                  style={{ background: PALETTES.bookmap_classic.getCssGradient() }}
                 />
                 <div className="flex justify-between text-[10px] font-mono text-slate-400">
-                  <span>0% (Charcoal: Zero Eye Strain)</span>
-                  <span>40% (Steel Teal: Normal Depth)</span>
-                  <span>75% (Amber: Significant Wall)</span>
-                  <span>100% (Crimson: Institutional Iceberg)</span>
+                  <span>0% (Deep Purple: Thin Low Liquidity)</span>
+                  <span>45% (Teal: Normal Depth Bed)</span>
+                  <span>75% (Lime Green: Significant Shelf)</span>
+                  <span>100% (Neon Yellow: Peak Institutional Wall)</span>
                 </div>
               </div>
 

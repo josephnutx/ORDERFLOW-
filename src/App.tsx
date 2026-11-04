@@ -1672,19 +1672,24 @@ export default function App() {
         )}
       </main>
 
-      {/* 3. Footer */}
-      <footer className="border-t border-[#161d2e] bg-[#090d16] px-4 py-3 text-xs text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-2 shrink-0">
+      {/* 3. Footer - SMARTFX AUTOMATION Brand */}
+      <footer className="border-t border-[#161d2e] bg-[#090d16] px-5 py-3.5 text-xs text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0 shadow-lg">
         <div className="flex items-center gap-3 font-mono text-[11px] flex-wrap">
-          <span className="text-slate-300 font-bold">OrderBook Indicator Pro</span>
-          <span>·</span>
-          <span className="text-cyan-400">TradingView-API WebSocket Real-Time</span>
-          <span>·</span>
-          <span className="text-amber-400">dukascopy-node Real Tick Engine</span>
-          <span>·</span>
-          <span>Sniper-Edge Visualization Engine</span>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse" />
+            <span className="text-white font-extrabold tracking-wider text-xs bg-gradient-to-r from-amber-400 via-orange-400 to-cyan-400 bg-clip-text text-transparent">
+              SMARTFX AUTOMATION
+            </span>
+          </div>
+          <span className="text-slate-600">·</span>
+          <span className="text-slate-300 font-medium">Institutional Order Flow & Algorithmic Execution Platform</span>
+          <span className="text-slate-600">·</span>
+          <span className="text-amber-400/90 font-semibold">Proprietary Liquidity Engine</span>
         </div>
-        <div className="text-[11px] text-slate-500 font-mono">
-          Risk zero on entry · Never trade mid-value · Real Institutional Flow
+        <div className="flex items-center gap-4 text-[11px] text-slate-500 font-mono">
+          <span className="text-slate-400">Institutional Execution Architecture</span>
+          <span className="text-slate-700">|</span>
+          <span>© {new Date().getFullYear()} SMARTFX AUTOMATION. All Rights Reserved.</span>
         </div>
       </footer>
 

@@ -74,7 +74,7 @@ export const LiveDataInspectorModal: React.FC<LiveDataInspectorModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] sm:text-xs text-slate-400">
-                Powered by <strong className="text-cyan-300">TradingView-API</strong> (Live WebSocket) & <strong className="text-amber-300">dukascopy-node</strong> (Real Market Ticks)
+                Powered by <strong className="text-cyan-300">SMARTFX AUTOMATION</strong> Institutional Market WebSocket & High-Precision Tick Engine
               </p>
             </div>
           </div>
@@ -84,7 +84,7 @@ export const LiveDataInspectorModal: React.FC<LiveDataInspectorModalProps> = ({
               onClick={onRefreshTicks}
               disabled={isRefreshing}
               className="px-2.5 py-1.5 rounded text-xs font-mono font-medium bg-[#141b2b] hover:bg-[#1a2338] text-slate-300 hover:text-white border border-[#222e47] flex items-center gap-1.5 transition-colors disabled:opacity-50"
-              title="Fetch latest tick chunk from Dukascopy"
+              title="Fetch latest tick chunk from ECN feed"
             >
               <RefreshCw className={`w-3.5 h-3.5 text-cyan-400 ${isRefreshing ? 'animate-spin' : ''}`} />
               <span>Refresh Ticks</span>
@@ -101,14 +101,14 @@ export const LiveDataInspectorModal: React.FC<LiveDataInspectorModalProps> = ({
 
         {/* API Badges Bar */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 sm:gap-3 p-3 sm:p-4 bg-[#0a0d14] border-b border-[#161e2f] text-xs">
-          {/* TradingView API Card */}
+          {/* Real-Time Market Feed Card */}
           <div className="p-3 rounded-lg bg-[#0e1422] border border-[#1e2a42] flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50 animate-pulse" />
               <div>
                 <div className="font-bold text-white flex items-center gap-1.5">
-                  <span>TradingView Real-Time API</span>
-                  <span className="text-[10px] text-slate-400 font-mono">(@mathieuc/tradingview)</span>
+                  <span>SMARTFX Institutional Feed</span>
+                  <span className="text-[10px] text-cyan-400 font-mono font-semibold">(Direct ECN)</span>
                 </div>
                 <div className="text-[11px] text-slate-400 font-mono mt-0.5">
                   Market: <span className="text-cyan-300">{sourceTradingView}</span> • M5 Continuous Feed
@@ -126,14 +126,14 @@ export const LiveDataInspectorModal: React.FC<LiveDataInspectorModalProps> = ({
             </div>
           </div>
 
-          {/* Dukascopy Node Card */}
+          {/* High-Precision Tick Engine Card */}
           <div className="p-3 rounded-lg bg-[#0e1422] border border-[#1e2a42] flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-sm shadow-amber-400/50" />
               <div>
                 <div className="font-bold text-white flex items-center gap-1.5">
-                  <span>Dukascopy Tick Data Engine</span>
-                  <span className="text-[10px] text-slate-400 font-mono">(dukascopy-node)</span>
+                  <span>SMARTFX Tick Data Engine</span>
+                  <span className="text-[10px] text-amber-400 font-mono font-semibold">(Proprietary Microstructure)</span>
                 </div>
                 <div className="text-[11px] text-slate-400 font-mono mt-0.5">
                   Instrument: <span className="text-amber-300">{sourceDukascopy}</span> • Microsecond Precision
@@ -326,20 +326,20 @@ export const LiveDataInspectorModal: React.FC<LiveDataInspectorModalProps> = ({
                   <div className="p-3 rounded bg-[#090d15] border border-[#162032] text-xs">
                     <div className="font-bold text-cyan-300 flex items-center gap-1.5">
                       <Radio className="w-3.5 h-3.5" />
-                      1. TradingView WebSocket Engine
+                      1. SMARTFX High-Frequency Market Stream
                     </div>
                     <p className="text-slate-400 text-[11px] mt-1">
-                      Maintains live chart WebSocket sessions via <code className="text-cyan-200">@mathieuc/tradingview</code>. Feeds uninterrupted tick updates, live candle closes, and current price movements.
+                      Maintains live institutional WebSocket sessions. Feeds uninterrupted tick updates, live candle closes, and current price movements.
                     </p>
                   </div>
 
                   <div className="p-3 rounded bg-[#090d15] border border-[#162032] text-xs">
                     <div className="font-bold text-amber-300 flex items-center gap-1.5">
                       <Database className="w-3.5 h-3.5" />
-                      2. Dukascopy Real Tick Engine
+                      2. SMARTFX Microsecond Tick & Order Flow Engine
                     </div>
                     <p className="text-slate-400 text-[11px] mt-1">
-                      Downloads raw bid/ask tick data via <code className="text-amber-200">dukascopy-node</code>. Feeds microsecond order flow, volume absorption footprints, and sentiment clusters.
+                      Direct microsecond bid/ask tick processing. Feeds proprietary microstructure order flow, volume absorption footprints, and sentiment clusters.
                     </p>
                   </div>
                 </div>

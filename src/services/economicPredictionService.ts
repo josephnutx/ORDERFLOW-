@@ -2,15 +2,18 @@
 // Exclusively provides real upcoming macroeconomic event predictions (PPI, Retail Sales, CPI, NFP, FOMC, Claims)
 // Strictly PREDICTIONS ONLY (No Stop Loss, No Take Profit)
 // Real-time synchronization with live economic calendar pipeline in strict chronological order of next upcoming release
+// Dynamically calculates pair-specific impact and transmission for whichever pair is selected!
 
 import { SniperModelOutput } from '../types/sniperModel';
+import { PairSpecificImpact, calculatePairSpecificImpact, PairImpactDirection } from './pairImpactEngine';
+import { getDstInfo } from './marketHoursService';
 
 export type MacroReleaseType = 'PPI' | 'RETAIL' | 'CPI' | 'NFP' | 'FOMC' | 'CLAIMS' | 'PCE' | 'OTHER';
 
 export interface ScenarioReaction {
   trigger: string;
   reaction: string;
-  bias: 'BULLISH' | 'BEARISH' | 'NEUTRAL' | 'STRONG_BULLISH' | 'RANGE_EXPANSION';
+  bias: PairImpactDirection;
 }
 
 export interface EconomicNewsPrediction {
@@ -23,11 +26,14 @@ export interface EconomicNewsPrediction {
   eventTime: number; // Unix timestamp ms
   timeUntilMinutes: number; // Exact minutes until release (negative if passed)
   countdownFormatted: string; // e.g. "T-1h 45m" or "Today at 08:30 AM"
-  timeFormatted: string; // "Today · 08:30 AM EDT"
-  dateFormatted: string; // "Thu, Oct 15, 2026"
+  timeFormatted: string; // "Today · 08:30 AM EST" (or EDT based on DST)
+  dateFormatted: string; // "Thu, Nov 5, 2026"
   badgeLabel: string; // "🔥 NEXT IMMINENT RELEASE"
   affectedInstruments: string[];
   isVerifiedFromLiveFeed: boolean;
+
+  // Active Selected Pair-Specific Impact (Dynamically recalculated on every pair switch!)
+  pairSpecificImpact: PairSpecificImpact;
 
   // 1. News Prediction & Consensus
   newsPrediction: {
@@ -67,13 +73,12 @@ export interface EconomicNewsPrediction {
   // 5. Final Prediction (Strictly PREDICTIONS ONLY - NO SL, NO TP)
   finalPrediction: {
     verdictCall: string;
-    directionalBias: 'STRONG_BULLISH' | 'BULLISH' | 'STRONG_BEARISH' | 'BEARISH' | 'SWEEP_AND_REVERSE' | 'RANGE_EXPANSION';
+    directionalBias: PairImpactDirection;
     confidenceScore: number; // 0-100%
     expectedPriceAction: string;
   };
 
   // 6. Rectified 2-Phase Sequence (Phase 1 Initial Knee-Jerk vs Phase 2 True Macro Direction)
-  // Rectified based on real market mechanics where news first executes an algorithmic stop-hunt before the true move
   twoPhaseMovePrediction: {
     phase1KneeJerk: {
       direction: 'BEARISH_KNEE_JERK_SWEEP' | 'BULLISH_KNEE_JERK_SWEEP' | 'TWO_WAY_CHOP';
@@ -264,17 +269,14 @@ export function formatLiveCountdown(minutes: number): string {
 
 /**
  * US Producer Price Index (PPI) - Passed & Printed Retrospective & Error Analysis
- * PPI has passed and printed: Headline +0.2% MoM (Prior: 0.4%, Forecast: 0.6%), Core +0.2% MoM (Prior: 0.2%, Forecast: 0.3%).
- * Retrospective Analysis on why it first went down (bearish algorithmic knee-jerk stop-hunt)
- * before playing out the massive bullish move, rectifying the model's omission for upcoming news.
  */
 export const PPI_POST_RELEASE_RETROSPECTIVE: PostReleaseRetrospective = {
-  id: 'ppi-oct15-retrospective',
+  id: 'ppi-retrospective',
   category: 'PPI',
   title: 'US Producer Price Index (PPI MoM & Core Final Demand)',
   currency: 'USD',
   impact: 'HIGH',
-  releaseTimeFormatted: 'Today · Released at 08:30 AM EDT',
+  releaseTimeFormatted: 'Recent Session · Released at 08:30 AM',
   actualPrintedValue: '+0.2% MoM (Core: +0.2%)',
   forecastValue: '+0.6% MoM (Core: 0.3%)',
   previousValue: '+0.4% MoM (Core: 0.2%)',
@@ -303,7 +305,7 @@ export const PPI_POST_RELEASE_RETROSPECTIVE: PostReleaseRetrospective = {
 /**
  * Generates verified, chronologically sorted upcoming economic news predictions
  * Strictly PREDICTIONS ONLY (No Stop Loss, No Take Profit)
- * Live events that have already passed (like PPI which printed +0.2%) are NEVER shown as upcoming!
+ * Tailored dynamically to the ACTIVE TRADING PAIR (currentSymbol)!
  */
 export function generateCuratedPredictions(
   currentSymbol: string,
@@ -312,8 +314,7 @@ export function generateCuratedPredictions(
   liveCalendarEvents: RawCalendarEvent[] = []
 ): EconomicNewsPrediction[] {
   const sym = currentSymbol.toUpperCase();
-  const currentPrice = modelOutput?.location?.currentPrice || (sym === 'XAUUSD' ? 2650.0 : 1.085);
-  const pStr = currentPrice.toFixed(digits);
+  const currentPrice = modelOutput?.location?.currentPrice || (sym === 'XAUUSD' ? 2742.50 : 1.085);
 
   const vs = modelOutput?.valueStructure || {
     poc: currentPrice * 0.998,
@@ -326,24 +327,20 @@ export function generateCuratedPredictions(
 
   const of = modelOutput?.orderFlow;
   const deltaVal = of?.delta ?? 240;
-  const cvdState = of?.cvdSlope || 'RISING';
 
-  const isGold = sym === 'XAUUSD';
-  const isEur = sym === 'EURUSD';
   const now = Date.now();
   const oneMin = 60 * 1000;
+  const dst = getDstInfo(new Date(now));
 
   // Separate true upcoming events (future releases) from already released historical items
   const upcomingEvents = (liveCalendarEvents || []).filter((e) => {
     const rawTime = e.eventTime || (e.scheduled_at ? new Date(e.scheduled_at).getTime() : 0);
     const mins = e.timeUntilMinutes ?? (rawTime > 0 ? Math.round((rawTime - now) / oneMin) : -1);
     const title = (e.eventTitle || e.event || '').toLowerCase();
-    // Exclude PPI because it has already passed and printed actual +0.2%
     if (title.includes('ppi') || title.includes('producer price')) return false;
     return mins >= 0 || (rawTime > now);
   });
 
-  // Helper to find specific catalyst in live upcoming events
   const findUpcoming = (matchFn: (title: string, currency: string) => boolean): RawCalendarEvent | undefined => {
     return upcomingEvents.find((e) => {
       const title = (e.eventTitle || e.event || '').toLowerCase();
@@ -355,13 +352,14 @@ export function generateCuratedPredictions(
   const results: EconomicNewsPrediction[] = [];
 
   // =========================================================================
-  // 2. US RETAIL SALES - TODAY'S CONSUMER RESILIENCE MOVER
+  // 1. US RETAIL SALES - CONSUMER RESILIENCE MOVER
   // =========================================================================
   const retailEv = findUpcoming((t) => t.includes('retail sales'));
   const retailRawTime = retailEv?.eventTime || (retailEv?.scheduled_at ? new Date(retailEv.scheduled_at).getTime() : now + 105 * oneMin);
   const retailMins = retailEv?.timeUntilMinutes ?? Math.max(1, Math.round((retailRawTime - now) / oneMin));
   const retailFc = retailEv?.forecast ? String(retailEv.forecast) : '0.3%';
   const retailPrev = retailEv?.previous ? String(retailEv.previous) : '1.2%';
+  const retailPairImpact = calculatePairSpecificImpact(currentSymbol, 'USD', 'RETAIL', modelOutput, digits);
 
   results.push({
     id: 'pred-retail-live',
@@ -373,11 +371,12 @@ export function generateCuratedPredictions(
     eventTime: retailRawTime,
     timeUntilMinutes: retailMins,
     countdownFormatted: formatLiveCountdown(retailMins),
-    timeFormatted: retailEv?.timeFormatted ? `Today · ${retailEv.timeFormatted}` : new Date(retailRawTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
-    dateFormatted: retailEv?.dateFormatted || 'Today, Oct 15, 2026',
+    timeFormatted: retailEv?.timeFormatted ? `Today · ${retailEv.timeFormatted}` : `Today · 08:30 AM ${dst.tzAbbreviation}`,
+    dateFormatted: retailEv?.dateFormatted || 'Today',
     badgeLabel: retailMins < 120 ? '🔥 IMMINENT CONSUMER SPENDING CATALYST' : 'HIGH IMPACT CONSUMER METRIC',
-    affectedInstruments: [sym, 'DXY', 'US500', 'US30', 'XAUUSD'],
+    affectedInstruments: [sym, 'DXY', 'US500', 'US30', 'XAUUSD', 'EURUSD', 'USDJPY'],
     isVerifiedFromLiveFeed: Boolean(retailEv),
+    pairSpecificImpact: retailPairImpact,
     newsPrediction: {
       headlineForecast: `Consensus expects retail sales growth moderating to ${retailFc} MoM (Prior: ${retailPrev}), with Core Retail at 0.6%.`,
       consensusValue: `${retailFc} MoM (Core: 0.6%)`,
@@ -393,70 +392,39 @@ export function generateCuratedPredictions(
       leadingIndicatorSignals: 'Redbook same-store sales tracked at +4.6% YoY, confirming baseline non-discretionary consumer resilience.',
     },
     modelMarketObservations: {
-      orderFlowState: 'Institutional market makers maintaining tight bid-ask spreads with heavy passive bids.',
+      orderFlowState: `Institutional market makers maintaining tight bid-ask spreads on ${sym}.`,
       restingLiquidity: `Resting orders concentrated at ${pocStr} with liquidity resting overhead at ${vahStr}.`,
-      cvdDeltaState: `Cumulative Delta +${deltaVal} contracts, showing solid buying absorption on minor dips.`,
-      valueAreaPositioning: `Consolidating in upper quartile of Value Area, building energy for breakout.`,
+      cvdDeltaState: `Cumulative Delta +${deltaVal} contracts, showing solid order absorption ahead of the print.`,
+      valueAreaPositioning: `Auctioning near fair value, ready for directional momentum on ${sym}.`,
     },
     assessmentWithNews: {
       pricingStatus: 'PARTIALLY_PRICED_IN',
       pricingExplanation: 'Soft-landing narrative is standard consensus; a resilient print validates continuous economic growth without reigniting rate hike fears.',
-      trapWarning: 'Whipsaw risk: Conflicting headline vs core prints often trigger fake initial breakouts in opposite directions.',
-      scenarioMatrix: {
-        hot: {
-          trigger: 'Retail Sales ≥ 0.6% (Hot Consumer)',
-          reaction: `Initial USD spike, brief equities dip, followed by rotational buying into value.`,
-          bias: 'RANGE_EXPANSION',
-        },
-        inLine: {
-          trigger: 'Retail Sales = 0.3% (Goldilocks)',
-          reaction: `Equities and metals rally in tandem as soft-landing thesis is confirmed.`,
-          bias: 'BULLISH',
-        },
-        cool: {
-          trigger: 'Retail Sales ≤ 0.0% (Consumer Slowdown)',
-          reaction: `DXY drops sharply; safe-haven demand propels Gold upward to new highs.`,
-          bias: 'BULLISH',
-        },
-      },
+      trapWarning: `Whipsaw risk on ${sym}: Conflicting headline vs core prints trigger fake initial breakouts.`,
+      scenarioMatrix: retailPairImpact.scenarioMatrix,
     },
     finalPrediction: {
-      verdictCall: isGold
-        ? 'FINAL PREDICTION: GOLD BULLISH EXPANSION ON DOLLAR SOFTNESS'
-        : 'FINAL PREDICTION: BULLISH VALUE AREA BREAKOUT',
-      directionalBias: 'BULLISH',
-      confidenceScore: 84,
-      expectedPriceAction: `Absorption of initial noise around ${pStr}, followed by an upward impulse testing ${vahStr}.`,
+      verdictCall: `FINAL PREDICTION: ${retailPairImpact.impactBadge} (${retailPairImpact.expectedExcursionDisplay})`,
+      directionalBias: retailPairImpact.directionalBias,
+      confidenceScore: retailPairImpact.confidenceScore,
+      expectedPriceAction: retailPairImpact.transmissionMechanics,
     },
     twoPhaseMovePrediction: {
-      phase1KneeJerk: {
-        direction: 'BEARISH_KNEE_JERK_SWEEP',
-        duration: '0 - 90 seconds post-print',
-        expectedAction: `Initial algorithmic knee-jerk dump sweeping sell-stops at VAL (${valStr}). Stop-hunt trap baiting breakout sellers.`,
-        trapWarning: 'DO NOT SELL THE INITIAL SPIKE. High-frequency algos sweep stops before institutional buying engages.',
-      },
-      phase2TrueMacroMove: {
-        direction: 'BULLISH_EXPANSION',
-        duration: '2 - 35 minutes sustained',
-        expectedAction: `Institutional limit absorption at ${valStr} followed by a violent short-squeeze lifting price through POC (${pocStr}) into VAH (${vahStr}).`,
-        primaryCatalyst: 'Consumer resilience validates soft landing without triggering Fed rate-hike concerns.',
-      },
-      theRightActualMovePlaybook: {
-        verdictSummary: 'RIGHT ACTUAL MOVE: WAIT FOR PHASE 1 SWEEP AT VAL -> BUY ON CONFIRMED ABSORPTION FOR PHASE 2 EXPANSION TO VAH',
-        recommendedExecution: `Allow first 90-120s to clear stops around ${valStr}. Enter Long once footprint delta flips positive.`,
-        timingAdvice: 'Execute at T+2m after Phase 1 knee-jerk exhausts.',
-      },
+      phase1KneeJerk: retailPairImpact.phase1KneeJerk,
+      phase2TrueMacroMove: retailPairImpact.phase2TrueMacroMove,
+      theRightActualMovePlaybook: retailPairImpact.rightActualMovePlaybook,
     },
   });
 
   // =========================================================================
-  // 3. UNEMPLOYMENT CLAIMS - TODAY'S LABOR RESILIENCE GAUGE
+  // 2. UNEMPLOYMENT CLAIMS - LABOR RESILIENCE GAUGE
   // =========================================================================
   const claimsEv = findUpcoming((t) => t.includes('unemployment claims') || t.includes('jobless claims'));
   const claimsRawTime = claimsEv?.eventTime || (claimsEv?.scheduled_at ? new Date(claimsEv.scheduled_at).getTime() : now + 105 * oneMin);
   const claimsMins = claimsEv?.timeUntilMinutes ?? Math.max(1, Math.round((claimsRawTime - now) / oneMin));
   const claimsFc = claimsEv?.forecast ? String(claimsEv.forecast) : '199K';
   const claimsPrev = claimsEv?.previous ? String(claimsEv.previous) : '197K';
+  const claimsPairImpact = calculatePairSpecificImpact(currentSymbol, 'USD', 'CLAIMS', modelOutput, digits);
 
   results.push({
     id: 'pred-claims-live',
@@ -468,11 +436,12 @@ export function generateCuratedPredictions(
     eventTime: claimsRawTime,
     timeUntilMinutes: claimsMins,
     countdownFormatted: formatLiveCountdown(claimsMins),
-    timeFormatted: claimsEv?.timeFormatted ? `Today · ${claimsEv.timeFormatted}` : new Date(claimsRawTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
-    dateFormatted: claimsEv?.dateFormatted || 'Today, Oct 15, 2026',
+    timeFormatted: claimsEv?.timeFormatted ? `Today · ${claimsEv.timeFormatted}` : `Today · 08:30 AM ${dst.tzAbbreviation}`,
+    dateFormatted: claimsEv?.dateFormatted || 'Today',
     badgeLabel: claimsMins < 120 ? '🔥 IMMINENT LABOR MARKET METRIC' : 'WEEKLY LABOR PULSE',
-    affectedInstruments: [sym, 'DXY', 'EURUSD', 'US500', 'XAUUSD'],
+    affectedInstruments: [sym, 'DXY', 'EURUSD', 'US500', 'XAUUSD', 'USDJPY'],
     isVerifiedFromLiveFeed: Boolean(claimsEv),
+    pairSpecificImpact: claimsPairImpact,
     newsPrediction: {
       headlineForecast: `Consensus forecasts initial claims steady at ${claimsFc} (Prior: ${claimsPrev}), remaining near historic lows.`,
       consensusValue: `${claimsFc}`,
@@ -488,66 +457,37 @@ export function generateCuratedPredictions(
       leadingIndicatorSignals: 'Continuing claims hovering at 1.83M, pointing to stable labor retention.',
     },
     modelMarketObservations: {
-      orderFlowState: 'Balanced two-sided order book depth, waiting for headline volume.',
+      orderFlowState: `Balanced two-sided order book depth on ${sym}, waiting for headline volume.`,
       restingLiquidity: `Thick liquidity bands located at POC (${pocStr}) and VAL (${valStr}).`,
       cvdDeltaState: `Delta remains neutral-to-positive (+${deltaVal}) ahead of multiple synchronous prints.`,
-      valueAreaPositioning: `Within fair value band, ready to follow PPI catalyst direction.`,
+      valueAreaPositioning: `Within fair value band on ${sym}, ready to follow primary catalyst direction.`,
     },
     assessmentWithNews: {
       pricingStatus: 'FULLY_PRICED_IN',
       pricingExplanation: 'Claims under 220K keep the Fed firmly on track; negligible standalone impact unless deviation exceeds 20K.',
-      trapWarning: 'Claims release coincides with PPI and Retail Sales; price action will be dominated by PPI inflation data.',
-      scenarioMatrix: {
-        hot: {
-          trigger: 'Claims > 220K (Labor Softening)',
-          reaction: `DXY drops, yields fall, Gold and Euro rally.`,
-          bias: 'BULLISH',
-        },
-        inLine: {
-          trigger: 'Claims ~ 199K (In-Line)',
-          reaction: `Neutral standalone impact; market follows PPI verdict.`,
-          bias: 'NEUTRAL',
-        },
-        cool: {
-          trigger: 'Claims < 190K (Tight Labor)',
-          reaction: `Yields firm, supporting USD against majors.`,
-          bias: 'BEARISH',
-        },
-      },
+      trapWarning: `Claims release coincides with Retail Sales; initial reaction on ${sym} will be driven by retail headline.`,
+      scenarioMatrix: claimsPairImpact.scenarioMatrix,
     },
     finalPrediction: {
-      verdictCall: 'FINAL PREDICTION: SYNERGISTIC EXPANSION FOLLOWING RETAIL DATA',
-      directionalBias: 'BULLISH',
-      confidenceScore: 81,
-      expectedPriceAction: `Secondary confirmation driver that reinforces the primary Retail Sales breakout path toward ${vahStr}.`,
+      verdictCall: `FINAL PREDICTION: ${claimsPairImpact.impactBadge} ON ${sym}`,
+      directionalBias: claimsPairImpact.directionalBias,
+      confidenceScore: claimsPairImpact.confidenceScore,
+      expectedPriceAction: claimsPairImpact.transmissionMechanics,
     },
     twoPhaseMovePrediction: {
-      phase1KneeJerk: {
-        direction: 'TWO_WAY_CHOP',
-        duration: '0 - 60 seconds post-print',
-        expectedAction: `Brief spread expansion and 2-way testing around POC (${pocStr}).`,
-        trapWarning: 'Avoid market orders during the first 60 seconds of spread widening.',
-      },
-      phase2TrueMacroMove: {
-        direction: 'BULLISH_EXPANSION',
-        duration: '2 - 25 minutes sustained',
-        expectedAction: `Orderly drift upward targeting overhead liquidity at VAH (${vahStr}) in sympathy with Retail Sales.`,
-        primaryCatalyst: 'Labor market stability maintaining risk asset confidence.',
-      },
-      theRightActualMovePlaybook: {
-        verdictSummary: 'RIGHT ACTUAL MOVE: BUY DIP ROTATIONS TO POC ONCE SPREAD NORMALIZES',
-        recommendedExecution: `Wait for spread to tighten; execute long on POC tests with institutional limit backing.`,
-        timingAdvice: 'Execute at T+2m post-release.',
-      },
+      phase1KneeJerk: claimsPairImpact.phase1KneeJerk,
+      phase2TrueMacroMove: claimsPairImpact.phase2TrueMacroMove,
+      theRightActualMovePlaybook: claimsPairImpact.rightActualMovePlaybook,
     },
   });
 
   // =========================================================================
-  // 4. CENTRAL BANK POLICY SPEAKERS (FED & BOE) - TONIGHT
+  // 3. CENTRAL BANK POLICY SPEAKERS (FED & BOE / ECB)
   // =========================================================================
-  const fedEv = findUpcoming((t) => t.includes('warsh') || t.includes('bailey') || t.includes('fomc') || t.includes('speaks'));
+  const fedEv = findUpcoming((t) => t.includes('warsh') || t.includes('bailey') || t.includes('fomc') || t.includes('speaks') || t.includes('fed'));
   const fedRawTime = fedEv?.eventTime || (fedEv?.scheduled_at ? new Date(fedEv.scheduled_at).getTime() : now + 660 * oneMin);
   const fedMins = fedEv?.timeUntilMinutes ?? Math.max(1, Math.round((fedRawTime - now) / oneMin));
+  const fedPairImpact = calculatePairSpecificImpact(currentSymbol, 'USD', 'FOMC', modelOutput, digits);
 
   results.push({
     id: 'pred-cb-speakers-live',
@@ -559,11 +499,12 @@ export function generateCuratedPredictions(
     eventTime: fedRawTime,
     timeUntilMinutes: fedMins,
     countdownFormatted: formatLiveCountdown(fedMins),
-    timeFormatted: fedEv?.timeFormatted ? `Tonight · ${fedEv.timeFormatted}` : 'Tonight · 11:30 PM EDT',
-    dateFormatted: fedEv?.dateFormatted || 'Tonight, Oct 15, 2026',
+    timeFormatted: fedEv?.timeFormatted ? `Tonight · ${fedEv.timeFormatted}` : `Tonight · 11:30 PM ${dst.tzAbbreviation}`,
+    dateFormatted: fedEv?.dateFormatted || 'Tonight',
     badgeLabel: 'KEY MONETARY POLICY FORUM',
-    affectedInstruments: [sym, 'DXY', 'GBPUSD', 'EURUSD', 'XAUUSD'],
+    affectedInstruments: [sym, 'DXY', 'GBPUSD', 'EURUSD', 'XAUUSD', 'USDJPY'],
     isVerifiedFromLiveFeed: Boolean(fedEv),
+    pairSpecificImpact: fedPairImpact,
     newsPrediction: {
       headlineForecast: 'Key policymakers expected to emphasize data dependency, neutral rate equilibrium, and balance sheet normalization.',
       consensusValue: 'Dovish Neutral Tone',
@@ -579,7 +520,7 @@ export function generateCuratedPredictions(
       leadingIndicatorSignals: 'Term premium in Treasury benchmarks remains anchored below historical peaks.',
     },
     modelMarketObservations: {
-      orderFlowState: 'Overnight session positioning historically favors institutional accumulation of hard assets.',
+      orderFlowState: `Overnight session positioning historically favors institutional positioning on ${sym}.`,
       restingLiquidity: `Resting ask depth waiting above VAH (${vahStr}), prime liquidity target.`,
       cvdDeltaState: `Institutional limit absorption evident on evening pullbacks.`,
       valueAreaPositioning: `Establishing higher value floor above POC (${pocStr}).`,
@@ -587,77 +528,49 @@ export function generateCuratedPredictions(
     assessmentWithNews: {
       pricingStatus: 'PARTIALLY_PRICED_IN',
       pricingExplanation: 'Any acknowledgement that neutral rate may be reached sooner will unlock immediate dollar selling.',
-      trapWarning: 'Late-session illiquid spikes can trigger fast stop runs before real directional flow sets in.',
-      scenarioMatrix: {
-        hot: {
-          trigger: 'Hawkish Recommitment (Higher for Longer)',
-          reaction: `Sharp dip re-testing VAL (${valStr}).`,
-          bias: 'BEARISH',
-        },
-        inLine: {
-          trigger: 'Balanced Data-Dependent Guidance',
-          reaction: `Steady upward drift across precious metals and risk assets.`,
-          bias: 'BULLISH',
-        },
-        cool: {
-          trigger: 'Dovish Reassurance on Rate Cuts',
-          reaction: `Immediate aggressive breakout to new weekly highs.`,
-          bias: 'STRONG_BULLISH',
-        },
-      },
+      trapWarning: `Late-session illiquid spikes on ${sym} can trigger fast stop runs before real directional flow sets in.`,
+      scenarioMatrix: fedPairImpact.scenarioMatrix,
     },
     finalPrediction: {
-      verdictCall: 'FINAL PREDICTION: DOVISH UNDERTONE EXPANDING RISK ASSETS',
-      directionalBias: 'BULLISH',
-      confidenceScore: 85,
-      expectedPriceAction: `Order flow accumulation through the evening, grinding higher toward ${vahStr}.`,
+      verdictCall: `FINAL PREDICTION: ${fedPairImpact.impactBadge} (POLICY GUIDANCE)`,
+      directionalBias: fedPairImpact.directionalBias,
+      confidenceScore: fedPairImpact.confidenceScore,
+      expectedPriceAction: fedPairImpact.transmissionMechanics,
     },
     twoPhaseMovePrediction: {
-      phase1KneeJerk: {
-        direction: 'BEARISH_KNEE_JERK_SWEEP',
-        duration: '0 - 3 minutes into opening remarks',
-        expectedAction: `Headline headline volatility testing support near POC (${pocStr}) as algos parse initial wire releases.`,
-        trapWarning: 'Do not chase headlines; speeches often contain nuanced offsetting commentary.',
-      },
-      phase2TrueMacroMove: {
-        direction: 'BULLISH_EXPANSION',
-        duration: '10 - 45 minutes sustained speech delivery',
-        expectedAction: `Gradual accumulation drifting upward toward VAH (${vahStr}) as easing bias is reinforced.`,
-        primaryCatalyst: 'Reassurance on rate cuts and liquidity support.',
-      },
-      theRightActualMovePlaybook: {
-        verdictSummary: 'RIGHT ACTUAL MOVE: ACCUMULATE LONG POST-HEADLINE DIP FOR EXTENDED DRIFT',
-        recommendedExecution: `Wait for initial headline knee-jerk to settle; enter Long on order-book defense.`,
-        timingAdvice: 'Execute 5 minutes after speech begins.',
-      },
+      phase1KneeJerk: fedPairImpact.phase1KneeJerk,
+      phase2TrueMacroMove: fedPairImpact.phase2TrueMacroMove,
+      theRightActualMovePlaybook: fedPairImpact.rightActualMovePlaybook,
     },
   });
 
   // =========================================================================
-  // 5. CONSUMER PRICE INDEX (CPI) - TOMORROW'S CALENDAR RELEASE
+  // 4. CONSUMER PRICE INDEX (CPI)
   // =========================================================================
   const cpiEv = findUpcoming((t) => t.includes('cpi') || t.includes('consumer price'));
-  // Note: Eurozone Final CPI is tomorrow morning on the live calendar (Fri Oct 16)
   const cpiRawTime = cpiEv?.eventTime || (cpiEv?.scheduled_at ? new Date(cpiEv.scheduled_at).getTime() : now + 1320 * oneMin);
   const cpiMins = cpiEv?.timeUntilMinutes ?? Math.max(1, Math.round((cpiRawTime - now) / oneMin));
   const cpiFc = cpiEv?.forecast ? String(cpiEv.forecast) : '3.8% YoY (Core: 2.5%)';
   const cpiPrev = cpiEv?.previous ? String(cpiEv.previous) : '3.8% YoY (Core: 2.5%)';
+  const cpiCurr = cpiEv?.currency || 'EUR';
+  const cpiPairImpact = calculatePairSpecificImpact(currentSymbol, cpiCurr, 'CPI', modelOutput, digits);
 
   results.push({
     id: 'pred-cpi-upcoming',
     category: 'CPI',
     title: cpiEv?.eventTitle || 'Consumer Price Index (CPI YoY & Final Core)',
-    currency: cpiEv?.currency || 'EUR',
+    currency: cpiCurr,
     impact: 'HIGH',
     status: cpiMins < 120 ? 'UPCOMING_IMMINENT' : 'UPCOMING',
     eventTime: cpiRawTime,
     timeUntilMinutes: cpiMins,
     countdownFormatted: formatLiveCountdown(cpiMins),
-    timeFormatted: cpiEv?.timeFormatted ? `Tomorrow · ${cpiEv.timeFormatted}` : 'Tomorrow · 05:00 AM EDT',
-    dateFormatted: cpiEv?.dateFormatted || 'Fri, Oct 16, 2026',
+    timeFormatted: cpiEv?.timeFormatted ? `Tomorrow · ${cpiEv.timeFormatted}` : `Tomorrow · 05:00 AM ${dst.tzAbbreviation}`,
+    dateFormatted: cpiEv?.dateFormatted || 'Tomorrow',
     badgeLabel: 'GLOBAL INFLATION BENCHMARK',
-    affectedInstruments: [sym, 'EURUSD', 'DXY', 'XAUUSD', 'GER40'],
+    affectedInstruments: [sym, 'EURUSD', 'DXY', 'XAUUSD', 'GER40', 'USDJPY'],
     isVerifiedFromLiveFeed: Boolean(cpiEv),
+    pairSpecificImpact: cpiPairImpact,
     newsPrediction: {
       headlineForecast: `Consensus estimates CPI steady at ${cpiFc} (Prior: ${cpiPrev}), confirming sustained disinflation.`,
       consensusValue: cpiFc,
@@ -673,7 +586,7 @@ export function generateCuratedPredictions(
       leadingIndicatorSignals: 'Import price indices dropped 0.4%, removing external price pressures.',
     },
     modelMarketObservations: {
-      orderFlowState: 'Institutional desks establishing tactical multi-day swing inventory.',
+      orderFlowState: `Institutional desks establishing tactical multi-day inventory on ${sym}.`,
       restingLiquidity: `Resting limit depth thick at POC (${pocStr}).`,
       cvdDeltaState: `Cumulative Delta confirms long-term institutional accumulation base.`,
       valueAreaPositioning: `Healthy rotation between VAL and VAH inside major multi-day balance area.`,
@@ -681,57 +594,28 @@ export function generateCuratedPredictions(
     assessmentWithNews: {
       pricingStatus: 'FULLY_PRICED_IN',
       pricingExplanation: 'Final readings rarely deviate substantially from flash estimates; market responds heavily only to unexpected revisions.',
-      trapWarning: 'Pre-market low liquidity can cause false breakouts before European cash open.',
-      scenarioMatrix: {
-        hot: {
-          trigger: 'Upward Revision ≥ +0.2%',
-          reaction: `ECB rate pause pricing, brief EUR spike against USD.`,
-          bias: 'BULLISH',
-        },
-        inLine: {
-          trigger: 'Confirmed In-Line Print',
-          reaction: `Smooth orderly continuation of prevailing multi-day trend.`,
-          bias: 'BULLISH',
-        },
-        cool: {
-          trigger: 'Downward Revision ≤ -0.2%',
-          reaction: `Accelerated rate cut expectations, boosting global liquidity assets.`,
-          bias: 'STRONG_BULLISH',
-        },
-      },
+      trapWarning: `Pre-market low liquidity can cause false breakouts on ${sym} before cash open.`,
+      scenarioMatrix: cpiPairImpact.scenarioMatrix,
     },
     finalPrediction: {
-      verdictCall: 'FINAL PREDICTION: BULLISH LIQUIDITY EXPANSION POST-CONFIRMATION',
-      directionalBias: 'BULLISH',
-      confidenceScore: 86,
-      expectedPriceAction: `Orderly consolidation followed by expansion into upper resistance band ${vahStr}.`,
+      verdictCall: `FINAL PREDICTION: ${cpiPairImpact.impactBadge} (${cpiPairImpact.expectedExcursionDisplay})`,
+      directionalBias: cpiPairImpact.directionalBias,
+      confidenceScore: cpiPairImpact.confidenceScore,
+      expectedPriceAction: cpiPairImpact.transmissionMechanics,
     },
     twoPhaseMovePrediction: {
-      phase1KneeJerk: {
-        direction: 'BEARISH_KNEE_JERK_SWEEP',
-        duration: '0 - 90 seconds post-print',
-        expectedAction: `Judas stop-hunt down to test discount liquidity at VAL (${valStr}).`,
-        trapWarning: 'Classic CPI manipulation sweep: algos clear resting stops before real money executes.',
-      },
-      phase2TrueMacroMove: {
-        direction: 'BULLISH_EXPANSION',
-        duration: '2 - 40 minutes sustained trend',
-        expectedAction: `Violent V-reversal from ${valStr} expanding through POC (${pocStr}) into VAH (${vahStr}).`,
-        primaryCatalyst: 'Core inflation stabilization cementing disinflation trajectory.',
-      },
-      theRightActualMovePlaybook: {
-        verdictSummary: 'RIGHT ACTUAL MOVE: BUY THE VAL LIQUIDITY SWEEP REVERSAL FOR SQUEEZE TO VAH',
-        recommendedExecution: `Allow algos to sweep ${valStr}. Enter Long when limit book absorption confirms.`,
-        timingAdvice: 'Execute at T+90s to T+2m post-print.',
-      },
+      phase1KneeJerk: cpiPairImpact.phase1KneeJerk,
+      phase2TrueMacroMove: cpiPairImpact.phase2TrueMacroMove,
+      theRightActualMovePlaybook: cpiPairImpact.rightActualMovePlaybook,
     },
   });
 
   // =========================================================================
-  // 6. NON-FARM PAYROLLS (NFP) - MACRO CYCLICAL ANCHOR
+  // 5. NON-FARM PAYROLLS (NFP)
   // =========================================================================
-  const nfpRawTime = now + 2880 * oneMin; // Scheduled upcoming cycle anchor
+  const nfpRawTime = now + 2880 * oneMin;
   const nfpMins = Math.round((nfpRawTime - now) / oneMin);
+  const nfpPairImpact = calculatePairSpecificImpact(currentSymbol, 'USD', 'NFP', modelOutput, digits);
 
   results.push({
     id: 'pred-nfp-anchor',
@@ -743,11 +627,12 @@ export function generateCuratedPredictions(
     eventTime: nfpRawTime,
     timeUntilMinutes: nfpMins,
     countdownFormatted: formatLiveCountdown(nfpMins),
-    timeFormatted: 'Upcoming Cycle · 08:30 AM EDT',
+    timeFormatted: `Upcoming Cycle · 08:30 AM ${dst.tzAbbreviation}`,
     dateFormatted: 'Upcoming Labor Friday',
     badgeLabel: 'TIER-1 MACRO ANCHOR',
-    affectedInstruments: [sym, 'DXY', 'EURUSD', 'US500', 'XAUUSD', 'US30'],
+    affectedInstruments: [sym, 'DXY', 'EURUSD', 'US500', 'XAUUSD', 'US30', 'USDJPY', 'USDCAD'],
     isVerifiedFromLiveFeed: false,
+    pairSpecificImpact: nfpPairImpact,
     newsPrediction: {
       headlineForecast: 'Consensus forecasts steady payroll additions of +155K with Unemployment holding at 4.2%.',
       consensusValue: '+155K / 4.2% Rate',
@@ -763,7 +648,7 @@ export function generateCuratedPredictions(
       leadingIndicatorSignals: 'JOLTS job openings to unemployed ratio holding near pre-pandemic baseline 1.15.',
     },
     modelMarketObservations: {
-      orderFlowState: 'Smart money maintaining core structural long exposure beneath the market.',
+      orderFlowState: `Smart money maintaining core structural exposure beneath the market on ${sym}.`,
       restingLiquidity: `Massive institutional liquidity pool resting at VAL (${valStr}).`,
       cvdDeltaState: `Persistent positive delta absorption (+${deltaVal}) across higher timeframes.`,
       valueAreaPositioning: `Positioned for multi-session expansion once macro volatility unlocks.`,
@@ -771,55 +656,23 @@ export function generateCuratedPredictions(
     assessmentWithNews: {
       pricingStatus: 'PARTIALLY_PRICED_IN',
       pricingExplanation: 'Market is primed for continuous labor normalization; deviations >35K trigger violent directional repricing.',
-      trapWarning: 'Classic NFP two-sided stop hunt: The initial 60-second spike almost always traps early momentum traders.',
-      scenarioMatrix: {
-        hot: {
-          trigger: 'NFP > 200K (Overheating Labor)',
-          reaction: `Violent initial drop testing ${valStr} before value buyers step in.`,
-          bias: 'BEARISH',
-        },
-        inLine: {
-          trigger: 'NFP = 140K - 170K (Goldilocks)',
-          reaction: `Aggressive rally in Gold and equities as Fed easing path is preserved.`,
-          bias: 'BULLISH',
-        },
-        cool: {
-          trigger: 'NFP < 110K (Labor Deterioration)',
-          reaction: `Emergency easing bets surge; Dollar drops and Gold skyrockets.`,
-          bias: 'STRONG_BULLISH',
-        },
-      },
+      trapWarning: `Classic NFP two-sided stop hunt on ${sym}: The initial 60-second spike traps early momentum traders.`,
+      scenarioMatrix: nfpPairImpact.scenarioMatrix,
     },
     finalPrediction: {
-      verdictCall: isGold
-        ? 'FINAL PREDICTION: BULLISH GOLD EXPLOSION POST-LIQUIDITY HARVEST'
-        : 'FINAL PREDICTION: BULLISH STRUCTURAL EXPANSION',
-      directionalBias: 'SWEEP_AND_REVERSE',
-      confidenceScore: 89,
-      expectedPriceAction: `Violent 45-second wick down to sweep retail sell-stops around ${valStr}, followed by instantaneous V-shape reversal through ${pocStr} into ${vahStr}.`,
+      verdictCall: `FINAL PREDICTION: ${nfpPairImpact.impactBadge} (${nfpPairImpact.expectedExcursionDisplay})`,
+      directionalBias: nfpPairImpact.directionalBias,
+      confidenceScore: nfpPairImpact.confidenceScore,
+      expectedPriceAction: nfpPairImpact.transmissionMechanics,
     },
     twoPhaseMovePrediction: {
-      phase1KneeJerk: {
-        direction: 'BEARISH_KNEE_JERK_SWEEP',
-        duration: '0 - 60 seconds post-print',
-        expectedAction: `Aggressive 45-second wick down to sweep retail sell-stops around ${valStr}.`,
-        trapWarning: 'Never enter on second 0 of NFP. 85% of initial 30-second moves are false breakouts.',
-      },
-      phase2TrueMacroMove: {
-        direction: 'BULLISH_EXPANSION',
-        duration: '2 - 60 minutes structural expansion',
-        expectedAction: `Instantaneous V-shape reversal through POC (${pocStr}) into ${vahStr}.`,
-        primaryCatalyst: 'Normalized labor growth locking in Federal Reserve easing cycle.',
-      },
-      theRightActualMovePlaybook: {
-        verdictSummary: 'RIGHT ACTUAL MOVE: FADE THE NFP STOP-HUNT SWEEP AND RIDE THE EXPANSION TO VAH',
-        recommendedExecution: `Wait for the first candle wick to reject ${valStr}. Enter Long on the reclaim.`,
-        timingAdvice: 'Execute at T+1m to T+2m.',
-      },
+      phase1KneeJerk: nfpPairImpact.phase1KneeJerk,
+      phase2TrueMacroMove: nfpPairImpact.phase2TrueMacroMove,
+      theRightActualMovePlaybook: nfpPairImpact.rightActualMovePlaybook,
     },
   });
 
-  // Sort strictly by what news is coming in next (chronological order)
+  // Sort strictly by upcoming release time (chronological order)
   return results.sort((a, b) => a.timeUntilMinutes - b.timeUntilMinutes);
 }
 
@@ -830,13 +683,14 @@ export function generateCuratedPredictions(
 export function getRecentlyReleasedEvents(liveCalendarEvents: RawCalendarEvent[] = []): ReleasedEventRecord[] {
   const now = Date.now();
   const oneMin = 60 * 1000;
+  const dst = getDstInfo(new Date(now));
 
   const verifiedPpiRelease: ReleasedEventRecord = {
     id: 'rel-ppi-verified-live',
     title: 'US Producer Price Index (PPI MoM & Core Final Demand)',
     currency: 'USD',
-    dateFormatted: 'Today, Oct 15, 2026',
-    timeFormatted: '08:30 AM EDT',
+    dateFormatted: 'Recent Session',
+    timeFormatted: `08:30 AM ${dst.tzAbbreviation}`,
     actual: '+0.2% MoM (Core: +0.2%)',
     forecast: '+0.6% MoM (Core: 0.3%)',
     previous: '+0.4% MoM (Core: 0.2%)',

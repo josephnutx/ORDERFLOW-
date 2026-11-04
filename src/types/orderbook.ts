@@ -124,7 +124,7 @@ export interface Candle {
   vwap: number;
 }
 
-export type HeatmapPalette = 'bookmap_classic' | 'blue_yellow_red' | 'inferno' | 'cyber_neon' | 'thermal_magma' | 'deep_tone';
+export type HeatmapPalette = 'bookmap_classic';
 
 export interface HeatmapCell {
   price: number;

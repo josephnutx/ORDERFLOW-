@@ -586,6 +586,11 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="text-[10px] font-bold tracking-tight">
               {marketSchedule.statusBadge}
             </span>
+            {marketSchedule.dstInfo && (
+              <span className="text-[9px] px-1.5 py-0.2 rounded bg-[#070b14] text-amber-300 border border-amber-500/40 font-mono hidden 2xl:inline" title={marketSchedule.dstInfo.activePolicyNote}>
+                {marketSchedule.dstInfo.tzAbbreviation} ({marketSchedule.dstInfo.utcOffsetLabel})
+              </span>
+            )}
             {marketSchedule.timeUntilOpenFormatted && !marketSchedule.isOpen && (
               <span className="text-[9px] px-1 py-0.2 rounded bg-black/60 text-slate-300 border border-slate-700/60 font-mono">
                 {marketSchedule.timeUntilOpenFormatted}
