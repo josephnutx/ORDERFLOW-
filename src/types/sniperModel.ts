@@ -243,6 +243,14 @@ export interface SniperEdgeEntry {
   liquiditySweepAudit?: LiquiditySweepManipulationAudit;
   orderFlowScalp?: OrderFlowScalpSignal;
   valueAreaAbsorptionReclaim?: ValueAreaAbsorptionReclaimStrategy;
+  anchoredVwapVerification?: {
+    sweepAvwap: number;
+    sessionAvwap: number;
+    climaxAvwap: number;
+    isAligned: boolean;
+    institutionalCostDefended: boolean;
+    detail: string;
+  };
 }
 
 export interface SniperModelOutput {

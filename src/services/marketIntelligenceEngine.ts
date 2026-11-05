@@ -12,6 +12,7 @@ import {
   MeanReversionIntelligence, 
   ClimacticIntelligence,
   CompressionIntelligence,
+  AnchoredVWAPIntelligence,
   RegimeIntelligence, 
   IntelligentFootprintBubble, 
   HighPrecisionEntry, 
@@ -21,6 +22,40 @@ import {
 } from '../types/marketIntelligence';
 import { analyzeMacroReaction, generateCuratedMacroCalendar } from './macroCalendarService';
 import { INSTRUMENTS, InstrumentConfig } from './mockDataGenerator';
+
+export function computeAnchoredVWAPInternal(
+  cList: Candle[],
+  startIndex: number,
+  d: number
+): { avwap: number; slope: 'RISING' | 'FALLING' | 'FLAT' } {
+  if (!cList || cList.length === 0) return { avwap: 0, slope: 'FLAT' };
+  const start = Math.max(0, Math.min(cList.length - 1, startIndex));
+  let sumPV = 0;
+  let sumV = 0;
+  for (let i = start; i < cList.length; i++) {
+    const c = cList[i];
+    const typicalPrice = (c.high + c.low + c.close) / 3;
+    const vol = Math.max(1, c.volume || 100);
+    sumPV += typicalPrice * vol;
+    sumV += vol;
+  }
+  const avwap = Number((sumPV / Math.max(1, sumV)).toFixed(d));
+  let prevAvwap = avwap;
+  if (cList.length - start > 1) {
+    let pPV = 0;
+    let pV = 0;
+    for (let i = start; i < cList.length - 1; i++) {
+      const c = cList[i];
+      const typicalPrice = (c.high + c.low + c.close) / 3;
+      const vol = Math.max(1, c.volume || 100);
+      pPV += typicalPrice * vol;
+      pV += vol;
+    }
+    prevAvwap = Number((pPV / Math.max(1, pV)).toFixed(d));
+  }
+  const slope = avwap > prevAvwap ? 'RISING' : avwap < prevAvwap ? 'FALLING' : 'FLAT';
+  return { avwap, slope };
+}
 
 export function computeMarketIntelligence(
   snapshot: OrderBookSnapshot,
@@ -654,6 +689,82 @@ export function computeMarketIntelligence(
   };
 
   // -------------------------------------------------------------
+  // 9D. ANCHORED VWAP (AVWAP) SIGNAL COOKING ENGINE
+  // -------------------------------------------------------------
+  // Calculates volume-weighted cost basis anchored from structural turning points
+  let sweepLowIdx = Math.max(0, recentCandles.length - 12);
+  let minLowCandle = Infinity;
+  for (let k = sweepLowIdx; k < recentCandles.length; k++) {
+    if (recentCandles[k].low < minLowCandle) {
+      minLowCandle = recentCandles[k].low;
+      sweepLowIdx = k;
+    }
+  }
+
+  let sweepHighIdx = Math.max(0, recentCandles.length - 12);
+  let maxHighCandle = -Infinity;
+  for (let k = sweepHighIdx; k < recentCandles.length; k++) {
+    if (recentCandles[k].high > maxHighCandle) {
+      maxHighCandle = recentCandles[k].high;
+      sweepHighIdx = k;
+    }
+  }
+
+  let peakVolIdx = Math.max(0, recentCandles.length - 20);
+  let maxRecentVol = 0;
+  for (let k = peakVolIdx; k < recentCandles.length; k++) {
+    if (recentCandles[k].volume > maxRecentVol) {
+      maxRecentVol = recentCandles[k].volume;
+      peakVolIdx = k;
+    }
+  }
+
+  const sweepLowAVWAP = computeAnchoredVWAPInternal(recentCandles, sweepLowIdx, digits);
+  const sweepHighAVWAP = computeAnchoredVWAPInternal(recentCandles, sweepHighIdx, digits);
+  const sessionAVWAP = computeAnchoredVWAPInternal(candles, 0, digits);
+  const climaxAVWAP = computeAnchoredVWAPInternal(recentCandles, peakVolIdx, digits);
+
+  const isNearFloor = currentPrice <= val + range * 0.15;
+  const isNearCeiling = currentPrice >= vah - range * 0.15;
+
+  const relevantSweepAVWAP = isNearFloor ? sweepLowAVWAP : isNearCeiling ? sweepHighAVWAP : sessionAVWAP;
+  const relevantSweepPrice = isNearFloor ? minLowCandle : isNearCeiling ? maxHighCandle : candles[0]?.open || currentPrice;
+  const relevantSweepType = isNearFloor ? 'SWING_LOW_SWEEP' : isNearCeiling ? 'SWING_HIGH_SWEEP' : 'SESSION_OPEN';
+
+  const isDefendingAVWAP = isNearFloor
+    ? currentPrice >= relevantSweepAVWAP.avwap - tickSize * 1.5
+    : isNearCeiling
+    ? currentPrice <= relevantSweepAVWAP.avwap + tickSize * 1.5
+    : true;
+
+  const priceVsSweepAVWAP: AnchoredVWAPIntelligence['priceVsSweepAVWAP'] = 
+    Math.abs(currentPrice - relevantSweepAVWAP.avwap) <= tickSize * 1.5
+      ? 'TESTING_AT_AVWAP'
+      : currentPrice > relevantSweepAVWAP.avwap
+      ? 'ABOVE_DEFENDED'
+      : 'BELOW_REJECTED';
+
+  const avwapDistancePips = Math.round(Math.abs(currentPrice - relevantSweepAVWAP.avwap) * pipMult);
+
+  const anchoredVWAPIntelligence: AnchoredVWAPIntelligence = {
+    sweepAnchorPrice: Number(relevantSweepPrice.toFixed(digits)),
+    sweepAnchorIndex: isNearFloor ? sweepLowIdx : sweepHighIdx,
+    sweepAnchorType: relevantSweepType,
+    sweepAVWAP: relevantSweepAVWAP.avwap,
+    sessionAVWAP: sessionAVWAP.avwap,
+    climaxAVWAP: climaxAVWAP.avwap,
+    priceVsSweepAVWAP,
+    distancePips: avwapDistancePips,
+    isDefendingAVWAP,
+    slope: relevantSweepAVWAP.slope,
+    institutionalInterpretation: isNearFloor
+      ? `Price (${currentPrice.toFixed(digits)}) holding above Post-Sweep Low AVWAP (${relevantSweepAVWAP.avwap.toFixed(digits)}); institutional buyers defending floor cost basis.`
+      : isNearCeiling
+      ? `Price (${currentPrice.toFixed(digits)}) rejected below Post-Sweep High AVWAP (${relevantSweepAVWAP.avwap.toFixed(digits)}); institutional sellers defending overhead cost basis.`
+      : `Price revolving around Session AVWAP (${sessionAVWAP.avwap.toFixed(digits)}) in fair value balance.`,
+  };
+
+  // -------------------------------------------------------------
   // 10. DYNAMIC MARKET REGIME ENGINE (§13)
   // -------------------------------------------------------------
   let primaryRegime: MarketRegimeType = 'BALANCE';
@@ -851,6 +962,10 @@ export function computeMarketIntelligence(
     confidence = 91;
     entryReasons.push(`Premium ceiling entry at Value Area High.`);
     entryReasons.push(`Sell limit wall absorption with trapped long crowd fuel.`);
+  }
+
+  if (anchoredVWAPIntelligence.isDefendingAVWAP) {
+    entryReasons.push(anchoredVWAPIntelligence.institutionalInterpretation);
   }
 
   const highPrecisionEntry: HighPrecisionEntry = {
@@ -1079,6 +1194,7 @@ export function computeMarketIntelligence(
     compression: compressionIntelligence,
     regime: regimeIntelligence,
     macroNews: macroIntelligence,
+    anchoredVWAP: anchoredVWAPIntelligence,
     intelligentBubbles,
     entryEngine: highPrecisionEntry,
     whyPriceIsMoving,

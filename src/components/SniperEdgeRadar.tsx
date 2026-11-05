@@ -19,7 +19,10 @@ import {
   TrendingUp, 
   Percent, 
   Sliders, 
-  Sparkles
+  Sparkles,
+  HelpCircle,
+  Info,
+  TrendingDown
 } from 'lucide-react';
 import { SniperModelOutput, SymbolTargetLifecycle } from '../types/sniperModel';
 
@@ -64,6 +67,7 @@ export const SniperEdgeRadar: React.FC<SniperEdgeRadarProps> = ({
 }) => {
   const [copiedSetup, setCopiedSetup] = useState<boolean>(false);
   const [showWickExplainer, setShowWickExplainer] = useState<boolean>(false);
+  const [showOrderFlowGuide, setShowOrderFlowGuide] = useState<boolean>(false);
 
   const { exhaustion, sniperEdge } = modelOutput;
   const digits = instrument.digits;
@@ -439,65 +443,278 @@ Monitoring order flow absorption as price advances across fair value Point of Co
 
       {/* 2. Middle Row: Dual Exhaustion Gauges & 5-Step Edge Verification Checklist */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Left Column (7 cols): Exhaustion & Power Remaining Engine */}
+        {/* Left Column (7 cols): Aggressive Order Flow Battle & Exhaustion Engine */}
         <div className="lg:col-span-7 bg-[#0b0f1a] border border-[#182338] rounded-xl p-4 md:p-5 flex flex-col justify-between shadow-lg">
           <div>
-            <div className="flex items-center justify-between border-b border-[#182338] pb-3 mb-4">
+            {/* Header: Title + Guide Toggle + Dominance Badge */}
+            <div className="flex flex-wrap items-center justify-between border-b border-[#182338] pb-3 mb-4 gap-2">
               <div className="flex items-center gap-2">
-                <BatteryWarning className="w-5 h-5 text-amber-400" />
-                <h3 className="text-sm font-bold text-white tracking-wide">
-                  EXHAUSTION & REMAINING FIREPOWER GAUGES
-                </h3>
+                <div className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                  <Activity className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white tracking-wide">
+                    AGGRESSIVE ORDER FLOW BATTLE: BUYERS VS SELLERS
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Market Buys (Lifting Asks) vs Market Sells (Hitting Bids)
+                  </p>
+                </div>
               </div>
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-[#131b2c] text-cyan-300 border border-[#1e2a42]">
-                Order Flow Exhaustion Monitor
-              </span>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowOrderFlowGuide(!showOrderFlowGuide)}
+                  className="flex items-center gap-1 text-[11px] font-mono px-2 py-1 rounded bg-[#131b2c] hover:bg-[#1a253c] text-cyan-300 border border-[#1e2a42] transition-colors"
+                  title="Click to understand how to read Aggressive Buyers vs Sellers"
+                >
+                  <HelpCircle className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>{showOrderFlowGuide ? 'Hide Guide' : 'How To Read & Trade'}</span>
+                </button>
+                <span className={`text-[11px] font-mono font-bold px-2.5 py-1 rounded border ${
+                  exhaustion.buyerPower > exhaustion.sellerPower
+                    ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+                    : exhaustion.sellerPower > exhaustion.buyerPower
+                    ? 'bg-red-950/80 text-red-300 border-red-500/40'
+                    : 'bg-slate-800 text-slate-300 border-slate-700'
+                }`}>
+                  {exhaustion.buyerPower > exhaustion.sellerPower
+                    ? `🟢 BUYERS DOMINATING (${exhaustion.buyerPower}%)`
+                    : exhaustion.sellerPower > exhaustion.buyerPower
+                    ? `🔴 SELLERS DOMINATING (${exhaustion.sellerPower}%)`
+                    : '⚖️ 50/50 BALANCED'}
+                </span>
+              </div>
             </div>
 
-            {/* Dual Power Bars: Buyer Power vs Seller Power */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-              {/* Seller Power Gauge */}
-              <div className="p-3.5 rounded-lg bg-[#140b12] border border-[#2b1424]">
-                <div className="flex items-center justify-between text-xs mb-1.5">
-                  <span className="text-slate-300 font-bold">Aggressive Seller Power</span>
-                  <span className={`font-mono font-bold ${exhaustion.sellerPower <= 15 ? 'text-red-400' : 'text-slate-200'}`}>
-                    {exhaustion.sellerPower}% Fuel
+            {/* Optional Expandable Order Flow 10-Second Guide */}
+            {showOrderFlowGuide && (
+              <div className="mb-4 p-3.5 rounded-lg bg-[#070e1b] border border-cyan-800/40 space-y-2 text-xs">
+                <div className="flex items-center gap-2 text-cyan-300 font-bold">
+                  <Info className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <span>HOW TO DETERMINE AGGRESSIVE BUYERS VS AGGRESSIVE SELLERS IN 10 SECONDS</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-[11px] text-slate-300">
+                  <div className="p-2.5 rounded bg-[#0b1424] border border-[#172640]">
+                    <div className="font-bold text-emerald-400 mb-1">1. Aggressive Buyers (Market Buys)</div>
+                    <p className="text-slate-400 leading-relaxed">
+                      Traders who click <span className="text-white font-semibold">BUY MARKET</span>. They pay the spread immediately to lift the Ask. When they dominate (green), price gets aggressively driven upward.
+                    </p>
+                  </div>
+                  <div className="p-2.5 rounded bg-[#0b1424] border border-[#172640]">
+                    <div className="font-bold text-red-400 mb-1">2. Aggressive Sellers (Market Sells)</div>
+                    <p className="text-slate-400 leading-relaxed">
+                      Traders who click <span className="text-white font-semibold">SELL MARKET</span>. They dump positions immediately into the Bid. When they dominate (red), price gets driven downward.
+                    </p>
+                  </div>
+                  <div className="p-2.5 rounded bg-[#0b1424] border border-[#172640]">
+                    <div className="font-bold text-amber-300 mb-1">3. Exhaustion & Sniper Entry</div>
+                    <p className="text-slate-400 leading-relaxed">
+                      When aggressive sellers attack a price but a large institutional <span className="text-white font-semibold">limit buy wall</span> absorbs every lot, sellers run out of orders (<span className="text-red-400 font-semibold">exhaustion</span>) and price explodes upward.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Tug-of-War Combatant Cards: Aggressive Sellers vs Aggressive Buyers */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+              {/* Left Combatant: Aggressive Sellers */}
+              <div className={`p-3.5 rounded-lg border transition-all ${
+                exhaustion.sellerPower <= 20
+                  ? 'bg-[#180a0e] border-red-500/40 shadow-sm shadow-red-950/50'
+                  : 'bg-[#140b12] border-[#2b1424]'
+              }`}>
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-sm shadow-red-500/50"></span>
+                    <span className="text-slate-200 font-bold uppercase tracking-wider text-[11px]">
+                      Aggressive Sellers
+                    </span>
+                  </div>
+                  <span className="font-mono text-[10px] text-red-400 font-bold bg-red-950/70 px-2 py-0.5 rounded border border-red-900/50">
+                    Market Sells @ Bid
                   </span>
                 </div>
-                <div className="w-full bg-[#200e1b] rounded-full h-3 overflow-hidden p-0.5 border border-[#38162d]">
+
+                <div className="flex items-baseline justify-between my-2">
+                  <div className="text-2xl font-mono font-bold text-white">
+                    {exhaustion.sellerPower}%
+                  </div>
+                  <div className="text-right">
+                    <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                      exhaustion.sellerPower <= 20
+                        ? 'bg-red-900/60 text-red-300 border border-red-600/50 uppercase'
+                        : exhaustion.sellerPower > exhaustion.buyerPower
+                        ? 'bg-red-950 text-red-400 border border-red-800'
+                        : 'bg-slate-800 text-slate-400'
+                    }`}>
+                      {exhaustion.sellerPower <= 20
+                        ? '⚡ Exhausted / 0 Firepower'
+                        : exhaustion.sellerPower > exhaustion.buyerPower
+                        ? '🔴 Heavy Selling Force'
+                        : 'Absorbed By Wall'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="w-full bg-[#200e1b] rounded-full h-2 overflow-hidden border border-[#38162d]">
                   <div 
                     className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-red-600 via-orange-500 to-amber-400"
                     style={{ width: `${exhaustion.sellerPower}%` }}
                   />
                 </div>
-                <div className="flex justify-between items-center text-[10px] font-mono mt-2 text-slate-400">
-                  <span>Status:</span>
-                  <span className={exhaustion.sellerPower <= 15 ? 'text-red-400 font-bold uppercase' : 'text-slate-300'}>
-                    {exhaustion.sellerPower <= 15 ? '⚡ Completely Depleted' : 'Active Momentum'}
+                <div className="text-[10px] text-slate-400 mt-2 flex items-center justify-between">
+                  <span>Microstructure:</span>
+                  <span className="font-mono text-slate-300">
+                    {exhaustion.sellerPower <= 20
+                      ? 'Sell orders absorbed by limit buyers'
+                      : 'Active market dumping into bid'}
                   </span>
                 </div>
               </div>
 
-              {/* Buyer Power Gauge */}
-              <div className="p-3.5 rounded-lg bg-[#071714] border border-[#10302b]">
-                <div className="flex items-center justify-between text-xs mb-1.5">
-                  <span className="text-slate-300 font-bold">Aggressive Buyer Power</span>
-                  <span className={`font-mono font-bold ${exhaustion.buyerPower >= 80 ? 'text-emerald-400' : 'text-slate-200'}`}>
-                    {exhaustion.buyerPower}% Fuel
+              {/* Right Combatant: Aggressive Buyers */}
+              <div className={`p-3.5 rounded-lg border transition-all ${
+                exhaustion.buyerPower >= 70
+                  ? 'bg-[#071914] border-emerald-500/40 shadow-sm shadow-emerald-950/50'
+                  : 'bg-[#071714] border-[#10302b]'
+              }`}>
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50"></span>
+                    <span className="text-slate-200 font-bold uppercase tracking-wider text-[11px]">
+                      Aggressive Buyers
+                    </span>
+                  </div>
+                  <span className="font-mono text-[10px] text-emerald-400 font-bold bg-emerald-950/70 px-2 py-0.5 rounded border border-emerald-900/50">
+                    Market Buys @ Ask
                   </span>
                 </div>
-                <div className="w-full bg-[#0a211d] rounded-full h-3 overflow-hidden p-0.5 border border-[#16433b]">
+
+                <div className="flex items-baseline justify-between my-2">
+                  <div className="text-2xl font-mono font-bold text-white">
+                    {exhaustion.buyerPower}%
+                  </div>
+                  <div className="text-right">
+                    <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                      exhaustion.buyerPower >= 70
+                        ? 'bg-emerald-900/60 text-emerald-300 border border-emerald-600/50 uppercase'
+                        : exhaustion.buyerPower > exhaustion.sellerPower
+                        ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                        : 'bg-slate-800 text-slate-400'
+                    }`}>
+                      {exhaustion.buyerPower >= 70
+                        ? '✓ Buyers In Full Command'
+                        : exhaustion.buyerPower > exhaustion.sellerPower
+                        ? '🟢 Initiative Expanding'
+                        : 'Passive / Waiting'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="w-full bg-[#0a211d] rounded-full h-2 overflow-hidden border border-[#16433b]">
                   <div 
                     className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-teal-500 via-emerald-400 to-cyan-300"
                     style={{ width: `${exhaustion.buyerPower}%` }}
                   />
                 </div>
-                <div className="flex justify-between items-center text-[10px] font-mono mt-2 text-slate-400">
-                  <span>Status:</span>
-                  <span className={exhaustion.buyerPower >= 80 ? 'text-emerald-400 font-bold uppercase' : 'text-slate-300'}>
-                    {exhaustion.buyerPower >= 80 ? '✓ Initiative In Command' : 'Absorbed / Neutral'}
+                <div className="text-[10px] text-slate-400 mt-2 flex items-center justify-between">
+                  <span>Microstructure:</span>
+                  <span className="font-mono text-slate-300">
+                    {exhaustion.buyerPower >= 70
+                      ? 'Chewing through overhead ask liquidity'
+                      : 'Holding resting limit bids'}
                   </span>
                 </div>
+              </div>
+            </div>
+
+            {/* Real-time Order Flow Tug-of-War Balance Meter */}
+            <div className="p-3 rounded-lg bg-[#080d19] border border-[#162238] mb-3">
+              <div className="flex items-center justify-between text-[11px] font-mono font-semibold mb-1.5">
+                <span className="text-red-400 flex items-center gap-1">
+                  <span>←</span>
+                  <span>Sellers Slamming Bids ({100 - Math.round(((exhaustion.buyerPower || 50) / ((exhaustion.buyerPower || 50) + (exhaustion.sellerPower || 50) || 100)) * 100)}%)</span>
+                </span>
+                <span className="text-slate-400 uppercase tracking-wider text-[10px]">Tug-of-War Dominance</span>
+                <span className="text-emerald-400 flex items-center gap-1">
+                  <span>Buyers Lifting Asks ({Math.round(((exhaustion.buyerPower || 50) / ((exhaustion.buyerPower || 50) + (exhaustion.sellerPower || 50) || 100)) * 100)}%)</span>
+                  <span>→</span>
+                </span>
+              </div>
+
+              {/* Progress Track with Center 50% Divider */}
+              <div className="relative w-full h-3 bg-[#131c2e] rounded-full overflow-hidden border border-[#1d2a45]">
+                {/* 50% Center Marker */}
+                <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-white/40 z-10" />
+                {/* Buyer portion bar from right or split */}
+                <div className="flex h-full w-full">
+                  <div 
+                    className="h-full bg-gradient-to-r from-red-600 to-rose-400 transition-all duration-700"
+                    style={{ width: `${100 - Math.round(((exhaustion.buyerPower || 50) / ((exhaustion.buyerPower || 50) + (exhaustion.sellerPower || 50) || 100)) * 100)}%` }}
+                  />
+                  <div 
+                    className="h-full bg-gradient-to-r from-emerald-500 to-cyan-400 transition-all duration-700"
+                    style={{ width: `${Math.round(((exhaustion.buyerPower || 50) / ((exhaustion.buyerPower || 50) + (exhaustion.sellerPower || 50) || 100)) * 100)}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="text-[10px] text-center font-mono mt-1.5 text-slate-400">
+                {exhaustion.buyerPower > exhaustion.sellerPower ? (
+                  <span className="text-emerald-300 font-bold">
+                    ▲ Aggressive Buyers are crossing the spread to lift offers (+{Math.abs(exhaustion.buyerPower - exhaustion.sellerPower)}% net buyer advantage)
+                  </span>
+                ) : exhaustion.sellerPower > exhaustion.buyerPower ? (
+                  <span className="text-red-300 font-bold">
+                    ▼ Aggressive Sellers are crossing the spread to dump into bids (+{Math.abs(exhaustion.sellerPower - exhaustion.buyerPower)}% net seller advantage)
+                  </span>
+                ) : (
+                  <span className="text-slate-300">
+                    ⚖ Order flow is at exact equilibrium (50/50 balance)
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Decisive Live Verdict Banner: Who is in control & what you should do */}
+            <div className={`p-3 rounded-lg border text-xs mb-3 ${
+              exhaustion.exhaustedSide === 'SELLERS' || exhaustion.buyerPower > exhaustion.sellerPower
+                ? 'bg-[#061814] border-emerald-500/40 text-emerald-100'
+                : exhaustion.exhaustedSide === 'BUYERS' || exhaustion.sellerPower > exhaustion.buyerPower
+                ? 'bg-[#180a0e] border-red-500/40 text-red-100'
+                : 'bg-[#0f1728] border-[#1e2d4a] text-slate-200'
+            }`}>
+              <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[11px] mb-1">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span className="text-amber-300">Live Order Flow Verdict & Action Rule:</span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-slate-200 mb-1.5">
+                {exhaustion.exhaustedSide === 'SELLERS' || exhaustion.buyerPower > exhaustion.sellerPower ? (
+                  <>
+                    <strong className="text-emerald-400 font-bold">AGGRESSIVE SELLERS ARE EXHAUSTED:</strong> Sellers attacked with market sell orders, but institutional limit buyers absorbed <strong className="text-white">{exhaustion.absorptionVolume} lots</strong> with zero downward progress. Sellers are out of fuel. Aggressive buyers now command the book.
+                  </>
+                ) : exhaustion.exhaustedSide === 'BUYERS' || exhaustion.sellerPower > exhaustion.buyerPower ? (
+                  <>
+                    <strong className="text-red-400 font-bold">AGGRESSIVE BUYERS ARE EXHAUSTED:</strong> Buyers pushed into overhead limit offers, but smart money absorbed <strong className="text-white">{exhaustion.absorptionVolume} lots</strong>. Buyers are out of orders. Aggressive sellers are driving price down.
+                  </>
+                ) : (
+                  <>
+                    <strong className="text-cyan-300 font-bold">BALANCED ORDER FLOW:</strong> Buyers and sellers are actively trading within the spread. No directional exhaustion detected yet.
+                  </>
+                )}
+              </p>
+              <div className="flex items-center gap-2 pt-1 border-t border-white/10 text-[10px] font-mono">
+                <span className="text-amber-400 font-bold uppercase shrink-0">Trading Directive:</span>
+                <span className="text-slate-300">
+                  {exhaustion.exhaustedSide === 'SELLERS' || exhaustion.buyerPower > exhaustion.sellerPower
+                    ? '🎯 DO NOT SHORT. Align with aggressive buyers or enter during wick formation at the limit wall.'
+                    : exhaustion.exhaustedSide === 'BUYERS' || exhaustion.sellerPower > exhaustion.buyerPower
+                    ? '🎯 DO NOT LONG. Sellers in command; look for distribution breakdown signals.'
+                    : '🎯 STAND BY. Await clear wall absorption and order flow exhaustion before entering.'}
+                </span>
               </div>
             </div>
 
@@ -533,7 +750,12 @@ Monitoring order flow absorption as price advances across fair value Point of Co
           </div>
 
           <div className="mt-4 pt-3 border-t border-[#182338] text-[11px] text-slate-400 flex items-center justify-between">
-            <span>When aggressive orders hit a passive wall with zero displacement, exhaustion triggers an explosive mean reversion.</span>
+            <span className="font-mono text-[10px] text-slate-500">
+              SMARTFX AUTOMATION · Institutional Order Flow Engine
+            </span>
+            <span className="text-[10px] text-cyan-400/90 font-mono">
+              Real-time Market Orders vs Depth Absorption
+            </span>
           </div>
         </div>
 

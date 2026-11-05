@@ -234,6 +234,23 @@ export interface CompressionIntelligence {
 }
 
 // -------------------------------------------------------------
+// 9D. Anchored VWAP (AVWAP) Signal Cooking Engine
+// -------------------------------------------------------------
+export interface AnchoredVWAPIntelligence {
+  sweepAnchorPrice: number;
+  sweepAnchorIndex: number;
+  sweepAnchorType: 'SWING_LOW_SWEEP' | 'SWING_HIGH_SWEEP' | 'SESSION_OPEN';
+  sweepAVWAP: number;
+  sessionAVWAP: number;
+  climaxAVWAP: number;
+  priceVsSweepAVWAP: 'ABOVE_DEFENDED' | 'BELOW_REJECTED' | 'TESTING_AT_AVWAP';
+  distancePips: number;
+  isDefendingAVWAP: boolean;
+  slope: 'RISING' | 'FALLING' | 'FLAT';
+  institutionalInterpretation: string;
+}
+
+// -------------------------------------------------------------
 // 10. Dynamic Market Regime Engine
 // -------------------------------------------------------------
 export type MarketRegimeType = 
@@ -412,6 +429,7 @@ export interface MarketIntelligenceOutput {
   compression: CompressionIntelligence;
   regime: RegimeIntelligence;
   macroNews: MacroNewsIntelligence;
+  anchoredVWAP?: AnchoredVWAPIntelligence;
   intelligentBubbles: IntelligentFootprintBubble[];
   entryEngine: HighPrecisionEntry;
   whyPriceIsMoving: WhyPriceIsMovingExplanation;

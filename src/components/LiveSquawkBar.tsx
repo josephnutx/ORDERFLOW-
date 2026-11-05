@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   tradingVoice,
   TradingVoiceSettings,
@@ -89,8 +89,8 @@ export const LiveSquawkBar: React.FC<LiveSquawkBarProps> = ({
   const [selectedAlertId, setSelectedAlertId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Unified AI + Live Model Report State (Synced continuously with live data)
-  const [report, setReport] = useState<FullModelAnalysisReport | null>(null);
+  // Unified AI + Live Model Report State
+  const [aiReport, setAiReport] = useState<FullModelAnalysisReport | null>(null);
   const [isLoadingAI, setIsLoadingAI] = useState<boolean>(false);
   const [analysisSource, setAnalysisSource] = useState<string>('Unified Institutional Engine');
   const [speakingSectionId, setSpeakingSectionId] = useState<string | null>(null);
@@ -100,10 +100,10 @@ export const LiveSquawkBar: React.FC<LiveSquawkBarProps> = ({
     latestInputsRef.current = { currentPrice, candles, snapshot, modelOutput };
   }, [currentPrice, candles, snapshot, modelOutput]);
 
-  // Continuously compute unified 6-section synthesis from live chart, order book, and model state
-  useEffect(() => {
-    if (!snapshot || !modelOutput || currentPrice <= 0) return;
-    const rep = generateFullModelSectionAnalysis(
+  // Continuously compute unified 6-section synthesis from live chart, order book, and model state without setState inside useEffect
+  const baselineReport = useMemo(() => {
+    if (!snapshot || !modelOutput || currentPrice <= 0) return null;
+    return generateFullModelSectionAnalysis(
       currentSymbol,
       currentPrice,
       candles,
@@ -111,17 +111,19 @@ export const LiveSquawkBar: React.FC<LiveSquawkBarProps> = ({
       modelOutput,
       modelOutput.marketIntelligence
     );
-    setReport((prev) => {
-      // Keep deep AI prose if already fetched for this symbol unless bias shifts
-      if (prev && prev.symbol === currentSymbol && analysisSource.includes('Gemini')) {
-        return {
-          ...rep,
-          professionalDebrief: prev.professionalDebrief || rep.professionalDebrief,
-        };
-      }
-      return rep;
-    });
-  }, [currentSymbol, currentPrice, candles, snapshot, modelOutput, analysisSource]);
+  }, [currentSymbol, currentPrice, candles, snapshot, modelOutput]);
+
+  const report = useMemo(() => {
+    if (aiReport && aiReport.symbol === currentSymbol) {
+      const formatted = formatPriceExact(currentPrice, currentSymbol);
+      return {
+        ...aiReport,
+        currentPrice,
+        priceFormatted: formatted,
+      };
+    }
+    return baselineReport;
+  }, [aiReport, currentSymbol, currentPrice, baselineReport]);
 
   // Fetch deep AI synthesis when drawer opens or symbol changes while open
   useEffect(() => {
@@ -145,7 +147,7 @@ export const LiveSquawkBar: React.FC<LiveSquawkBarProps> = ({
     )
       .then((res) => {
         if (res && res.report) {
-          setReport(res.report);
+          setAiReport(res.report);
           setAnalysisSource(res.source);
         }
       })
@@ -165,8 +167,8 @@ export const LiveSquawkBar: React.FC<LiveSquawkBarProps> = ({
     });
 
     const unsubTranscript = tradingVoice.subscribeTranscript((history) => {
-      if (history.length > 0 && !lastItem) {
-        setLastItem(history[0]);
+      if (history.length > 0) {
+        setLastItem((prev) => prev || history[0]);
       }
     });
 
@@ -174,7 +176,7 @@ export const LiveSquawkBar: React.FC<LiveSquawkBarProps> = ({
       unsub();
       unsubTranscript();
     };
-  }, [lastItem]);
+  }, []);
 
   const handleToggleMute = () => {
     const newCadence = settings.cadence === 'muted' ? 'continuous' : 'muted';
@@ -214,34 +216,6 @@ export const LiveSquawkBar: React.FC<LiveSquawkBarProps> = ({
     }
   };
 
-  // Keep active synthesis report strictly synchronized with live streaming price
-  useEffect(() => {
-    if (!report || currentPrice <= 0) return;
-    if (Math.abs(report.currentPrice - currentPrice) > 0.000001) {
-      const formatted = formatPriceExact(currentPrice, currentSymbol);
-      const oldPrice = report.currentPrice;
-      setReport((prev) => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          currentPrice: currentPrice,
-          priceFormatted: formatted,
-          headlineSummary: reconcileScriptPrices(prev.headlineSummary, currentSymbol, currentPrice, oldPrice),
-          professionalDebrief: prev.professionalDebrief
-            ? reconcileScriptPrices(prev.professionalDebrief, currentSymbol, currentPrice, oldPrice)
-            : prev.professionalDebrief,
-          executiveSummary: reconcileScriptPrices(prev.executiveSummary, currentSymbol, currentPrice, oldPrice),
-          fullSpokenScript: reconcileScriptPrices(prev.fullSpokenScript, currentSymbol, currentPrice, oldPrice),
-          finalSignalVerdict: prev.finalSignalVerdict
-            ? {
-                ...prev.finalSignalVerdict,
-                headline: `FINAL VERDICT: ${prev.finalSignalVerdict.actionBadge} ON ${currentSymbol === 'XAUUSD' ? 'GOLD' : currentSymbol} AT ${formatted}`,
-              }
-            : prev.finalSignalVerdict,
-        };
-      });
-    }
-  }, [currentPrice, currentSymbol]);
 
   // Speak unified live intelligence now with 100% verified real-time price
   const handleSpeakUnifiedNow = (e?: React.MouseEvent) => {
@@ -258,7 +232,7 @@ export const LiveSquawkBar: React.FC<LiveSquawkBarProps> = ({
         modelOutput,
         modelOutput.marketIntelligence
       );
-      setReport(liveReport);
+      setAiReport(liveReport);
       setSpeakingSectionId('full');
       tradingVoice.speak(liveReport.fullSpokenScript, {
         priority: true,
@@ -298,7 +272,7 @@ export const LiveSquawkBar: React.FC<LiveSquawkBarProps> = ({
         modelOutput,
         modelOutput.marketIntelligence
       );
-      setReport(instantReport);
+      setAiReport(instantReport);
       setSpeakingSectionId('full');
       tradingVoice.speak(instantReport.fullSpokenScript, {
         priority: true,
@@ -325,7 +299,7 @@ export const LiveSquawkBar: React.FC<LiveSquawkBarProps> = ({
     )
       .then((res) => {
         if (res && res.report) {
-          setReport(res.report);
+          setAiReport(res.report);
           setAnalysisSource(res.source);
           // If not currently speaking, broadcast the refined synthesis aloud
           if (!tradingVoice.isSpeaking()) {
@@ -727,7 +701,7 @@ export const LiveSquawkBar: React.FC<LiveSquawkBarProps> = ({
                         <span>What You Should Do (Action Plan)</span>
                       </div>
                       <ul className="space-y-1.5 text-[11px] text-slate-200">
-                        {report.finalSignalVerdict.whatYouShouldDo.map((item, idx) => (
+                        {report.finalSignalVerdict.whatYouShouldDo.map((item: string, idx: number) => (
                           <li key={idx} className="flex items-start gap-1.5 leading-snug">
                             <span className="text-emerald-400 font-bold shrink-0 mt-0.5">✓</span>
                             <span>{item}</span>
@@ -743,7 +717,7 @@ export const LiveSquawkBar: React.FC<LiveSquawkBarProps> = ({
                         <span>What You Should NOT Do (Anti-Trap Guard)</span>
                       </div>
                       <ul className="space-y-1.5 text-[11px] text-slate-200">
-                        {report.finalSignalVerdict.whatYouShouldNotDo.map((item, idx) => (
+                        {report.finalSignalVerdict.whatYouShouldNotDo.map((item: string, idx: number) => (
                           <li key={idx} className="flex items-start gap-1.5 leading-snug">
                             <span className="text-red-400 font-bold shrink-0 mt-0.5">✕</span>
                             <span>{item}</span>
@@ -883,7 +857,7 @@ export const LiveSquawkBar: React.FC<LiveSquawkBarProps> = ({
                     <span className="text-slate-400">Live Price: {report.priceFormatted}</span>
                   </div>
                   <div className="space-y-1.5 max-h-[115px] overflow-y-auto scrollbar-thin pr-1">
-                    {(report.levelInteractions || []).map((lvl, i) => (
+                    {(report.levelInteractions || []).map((lvl: any, i: number) => (
                       <div
                         key={i}
                         className="flex items-start justify-between gap-2 text-[11px] bg-[#0a1020] px-2 py-1.5 rounded border border-[#152238]"
@@ -912,7 +886,7 @@ export const LiveSquawkBar: React.FC<LiveSquawkBarProps> = ({
 
               {/* 6-Pillar Model Intelligence Strip (All working together in one view) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {(report.sections || []).map((sec, idx) => {
+                {(report.sections || []).map((sec: ModelSectionReport, idx: number) => {
                   const isSecSpeaking = isSpeaking && speakingSectionId === sec.id;
                   return (
                     <div

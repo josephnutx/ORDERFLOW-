@@ -120,10 +120,13 @@ export const CandleChartWithBubbles: React.FC<CandleChartProps> = ({
 
   // When a new signal appears, record its print timestamp
   useEffect(() => {
-    if (currentSignalId && !printedTimestamps[currentSignalId]) {
-      setPrintedTimestamps((prev) => ({ ...prev, [currentSignalId]: Date.now() }));
+    if (currentSignalId) {
+      setPrintedTimestamps((prev) => {
+        if (prev[currentSignalId]) return prev;
+        return { ...prev, [currentSignalId]: Date.now() };
+      });
     }
-  }, [currentSignalId, printedTimestamps]);
+  }, [currentSignalId]);
 
   // Auto-remove wick signal after print once price departs into profit (3+ ticks) or after 16 seconds
   useEffect(() => {

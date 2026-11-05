@@ -70,6 +70,8 @@ export interface AchievedSignalRecord {
   reason: string;
 }
 
+const EMPTY_TICKS: DukascopyTick[] = [];
+
 export default function App() {
   const [currentSymbol, setCurrentSymbol] = useState<string>('XAUUSD');
   const [snapshotIndex, setSnapshotIndex] = useState<number>(23); // Default to latest live snapshot
@@ -306,8 +308,8 @@ export default function App() {
 
   // Settings
   const [settings, setSettings] = useState<OrderBookSettings>({
-    depth: 32,
-    layout: 'classic_two_sided',
+    depth: 20,
+    layout: 'classic_one_sided',
     filterMode: 'ALL',
     showLeftOrders: true,
     showRightPositions: true,
@@ -346,7 +348,7 @@ export default function App() {
     return marketData.candles;
   }, [currentLiveData?.candles, marketData.candles]);
 
-  const effectiveTicks: DukascopyTick[] = currentLiveData?.ticks ?? [];
+  const effectiveTicks: DukascopyTick[] = currentLiveData?.ticks && currentLiveData.ticks.length > 0 ? currentLiveData.ticks : EMPTY_TICKS;
 
   // Active bubbles: real Dukascopy tick volume absorption clusters if available, else simulated bubbles
   const effectiveBubbles: FootprintBubble[] = useMemo(() => {

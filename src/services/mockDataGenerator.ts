@@ -9,7 +9,7 @@ import {
   LiquiditySweepZone
 } from '../types/orderbook';
 import { SniperModelOutput, OrderFlowScalpSignal, ValueAreaAbsorptionReclaimStrategy } from '../types/sniperModel';
-import { computeMarketIntelligence } from './marketIntelligenceEngine';
+import { computeMarketIntelligence, computeAnchoredVWAPInternal } from './marketIntelligenceEngine';
 import { getMarketScheduleStatus, MarketScheduleStatus } from './marketHoursService';
 
 export interface InstrumentConfig {
@@ -808,13 +808,46 @@ export function computeSniperModel(
   const multiPillarConfluenceScore = Math.max(92, mi.entryEngine.confidence || 94);
   const marketMovingBlockCount = Math.max(3, mi.intelligentBubbles.filter((b) => b.isMarketMoving).length);
 
+  // -------------------------------------------------------------
+  // Internal Anchored VWAP (AVWAP) Signal Cooking Engine (§9D)
+  // Computes institutional cost basis from key structural anchors
+  // (Sweep Low, Sweep High, Session Start) inside the signal engine.
+  // -------------------------------------------------------------
+  let sweepLowIdx = Math.max(0, candles.length - 12);
+  let minLowPrice = Infinity;
+  for (let k = sweepLowIdx; k < candles.length; k++) {
+    if (candles[k].low < minLowPrice) {
+      minLowPrice = candles[k].low;
+      sweepLowIdx = k;
+    }
+  }
+
+  let sweepHighIdx = Math.max(0, candles.length - 12);
+  let maxHighPrice = -Infinity;
+  for (let k = sweepHighIdx; k < candles.length; k++) {
+    if (candles[k].high > maxHighPrice) {
+      maxHighPrice = candles[k].high;
+      sweepHighIdx = k;
+    }
+  }
+
+  const avwapSweepLow = computeAnchoredVWAPInternal(candles, sweepLowIdx, digits);
+  const avwapSweepHigh = computeAnchoredVWAPInternal(candles, sweepHighIdx, digits);
+  const avwapSession = computeAnchoredVWAPInternal(candles, 0, digits);
+
+  // Institutional AVWAP Cost Defense:
+  // For Longs: Price must hold >= Post-Sweep Low AVWAP - 1.5 ticks (buyers defending average fill)
+  // For Shorts: Price must hold <= Post-Sweep High AVWAP + 1.5 ticks (sellers defending average fill)
+  const hasFloorAVWAPDefense = currentPrice >= avwapSweepLow.avwap - tick * 1.5;
+  const hasCeilingAVWAPDefense = currentPrice <= avwapSweepHigh.avwap + tick * 1.5;
+
   // Verify whether the attracting liquidity pool at the extreme has actually been swept & manipulation reclaimed
-  // AND corroborated by Order Flow (Delta/CVD), DOM Wall Absorption, Iceberg Refills, and Trapped Counterparties
+  // AND corroborated by Order Flow (Delta/CVD), DOM Wall Absorption, Iceberg Refills, Trapped Counterparties, and AVWAP Defense
   const isAtUpperLiquidityZone = currentPrice >= vah - range * 0.12 || (wickHigh >= vah - range * 0.04 && currentPrice >= poc + range * 0.14);
   const isAtLowerLiquidityZone = currentPrice <= val + range * 0.12 || (wickLow <= val + range * 0.04 && currentPrice <= poc - range * 0.14);
 
-  const isCeilingEdge = isAtUpperLiquidityZone && hasSellWall && hasAbsorptionConfluence && hasOrderFlowConfluence && hasTrapConfluence;
-  const isFloorEdge = !isCeilingEdge && isAtLowerLiquidityZone && hasBuyWall && hasAbsorptionConfluence && hasOrderFlowConfluence && hasTrapConfluence;
+  const isCeilingEdge = isAtUpperLiquidityZone && hasSellWall && hasAbsorptionConfluence && hasOrderFlowConfluence && hasTrapConfluence && hasCeilingAVWAPDefense;
+  const isFloorEdge = !isCeilingEdge && isAtLowerLiquidityZone && hasBuyWall && hasAbsorptionConfluence && hasOrderFlowConfluence && hasTrapConfluence && hasFloorAVWAPDefense;
   const isBalancedChop = !isCeilingEdge && !isFloorEdge;
 
   // Detect if price is drifting toward an unswept liquidity magnet (Premature Signal Guard active)
@@ -865,7 +898,7 @@ export function computeSniperModel(
   const entryPrice = Number(currentPrice.toFixed(digits));
   const riskRewardRatio = isBalancedChop ? 1.0 : Number((Math.abs(targetTP2 - entryPrice) / Math.max(tick, Math.abs(entryPrice - stopLoss))).toFixed(2));
 
-  // Hard Gates HG1 - HG7 (§4.1)
+  // Hard Gates HG1 - HG8 (§4.1)
   const hardGates = [
     { id: 'HG1', title: 'Attracting Liquidity Cleared', passed: !isBalancedChop, detail: isBalancedChop ? 'Unswept liquidity pool still attracting price; premature entry blocked' : `All attracting stops swept at ${(isCeilingEdge ? upperAttractingPoolPrice : lowerAttractingPoolPrice).toFixed(digits)}` },
     { id: 'HG2', title: 'Manipulation / Stop-Hunt Reclaimed', passed: !isBalancedChop, detail: isCeilingEdge ? `Judas swing above VAH (${vah.toFixed(digits)}) absorbed & reclaimed` : isFloorEdge ? `Stop-hunt below VAL (${val.toFixed(digits)}) absorbed & reclaimed` : `Waiting for stop-hunt manipulation to finish` },
@@ -874,9 +907,10 @@ export function computeSniperModel(
     { id: 'HG5', title: 'Effort vs Result Absorption Proof', passed: !isBalancedChop, detail: isBalancedChop ? 'No post-sweep absorption proof yet' : 'Passive limit wall absorbed manipulation spike with zero follow-through' },
     { id: 'HG6', title: 'Clean Post-Sweep Trigger', passed: !isBalancedChop, detail: `${playName} fired with protected post-sweep invalidation` },
     { id: 'HG7', title: 'Risk Sanity', passed: riskRewardRatio >= 2.0, detail: `RR ${riskRewardRatio}:1 >= 2.0; stop protected behind cleared liquidity void` },
+    { id: 'HG8', title: 'Anchored VWAP Cost Defense', passed: isCeilingEdge ? hasCeilingAVWAPDefense : isFloorEdge ? hasFloorAVWAPDefense : true, detail: isCeilingEdge ? `Post-Sweep High AVWAP @ ${avwapSweepHigh.avwap.toFixed(digits)} defended; price holding below institutional average entry` : isFloorEdge ? `Post-Sweep Low AVWAP @ ${avwapSweepLow.avwap.toFixed(digits)} defended; price holding above institutional average entry` : `Monitoring structural anchor levels (Session AVWAP @ ${avwapSession.avwap.toFixed(digits)})` },
   ];
 
-  // Soft Confirmations C1 - C15 (§4.2)
+  // Soft Confirmations C1 - C16 (§4.2)
   const confirmations = [
     { id: 'C1', title: 'Aggression of correct side (initiative rVOL)', weight: 2, passed: !isBalancedChop },
     { id: 'C2', title: 'Absorption at the level (passive wall absorbing)', weight: 2, passed: isAbsorption },
@@ -893,6 +927,7 @@ export function computeSniperModel(
     { id: 'C13', title: 'Entering from correct half (discount for long / premium for short)', weight: 1, passed: isCeilingEdge ? currentPrice >= poc : isFloorEdge ? currentPrice <= poc : false },
     { id: 'C14', title: 'CVD confirms (cumulative volume delta)', weight: 1, passed: !isBalancedChop },
     { id: 'C15', title: 'Momentum / volatility expansion supports move', weight: 1, passed: !isBalancedChop },
+    { id: 'C16', title: 'Anchored VWAP confluence (Post-Sweep & Session AVWAP defended)', weight: 2, passed: isCeilingEdge ? hasCeilingAVWAPDefense : isFloorEdge ? hasFloorAVWAPDefense : false },
   ];
 
   const totalScore = confirmations.reduce((sum, c) => c.passed ? sum + c.weight : sum, 0);
@@ -1019,14 +1054,23 @@ export function computeSniperModel(
       potentialPipsRisk: riskPips,
       potentialPipsReward: rewardPips,
       confidenceScore: 96,
-      playbookTrigger: 'PLAY B: Full-Model Confluence Short Flip (Liquidity Sweep + DOM Iceberg Absorption + CVD Divergence + Trapped Longs)',
+      playbookTrigger: 'PLAY B: Full-Model Confluence Short Flip (Liquidity Sweep + DOM Iceberg Absorption + CVD Divergence + AVWAP Defense + Trapped Longs)',
       reasons: [
         `1. Liquidity Sweep & Stop-Hunt Cleared: Overhead buy-stops @ ${upperAttractingPoolPrice.toFixed(digits)} (${sweptUpperVolumeLots} lots) swept & Judas swing reclaimed below VAH (${vah.toFixed(digits)})`,
         `2. DOM & Iceberg Passive Absorption: ${snapshot.leftBook.sellLimitPct}% sell limit wall (${mi.liquidity.replenishmentBehavior.replace(/_/g, ' ')}) soaked up aggressive buyers with 0 tick continuation`,
         `3. Footprint & CVD Order-Flow Flip: Bearish delta divergence (${mi.orderFlow.cvdTrend.replace(/_/g, ' ')}) + ${marketMovingBlockCount} institutional footprint blocks confirm seller control`,
         `4. Trapped Counterparty Liquidation Fuel: ${snapshot.rightBook.lossBuyersPct}% late retail breakout buyers trapped at highs (${exhaustionScore}% buyer exhaustion), forced to sell to cover`,
-        `5. Value Auction & Macro Alignment: ${mi.regime.primaryRegime.replace(/_/g, ' ')} regime (${multiPillarConfluenceScore}/100 confluence) pulling price to POC (${tp1.toFixed(digits)}) & VAL (${tp2.toFixed(digits)})`,
+        `5. Anchored VWAP Institutional Defense: Price strictly rejected below Post-Sweep High AVWAP (${avwapSweepHigh.avwap.toFixed(digits)}), confirming institutional short cost basis is protected`,
+        `6. Value Auction & Macro Alignment: ${mi.regime.primaryRegime.replace(/_/g, ' ')} regime (${multiPillarConfluenceScore}/100 confluence) pulling price to POC (${tp1.toFixed(digits)}) & VAL (${tp2.toFixed(digits)})`,
       ],
+      anchoredVwapVerification: {
+        sweepAvwap: avwapSweepHigh.avwap,
+        sessionAvwap: avwapSession.avwap,
+        climaxAvwap: avwapSweepHigh.avwap,
+        isAligned: hasCeilingAVWAPDefense,
+        institutionalCostDefended: hasCeilingAVWAPDefense,
+        detail: `Price (${currentPrice.toFixed(digits)}) rejected below Post-Sweep High AVWAP (${avwapSweepHigh.avwap.toFixed(digits)}); institutional short cost basis protected.`,
+      },
       liquiditySweepAudit: {
         allAttractingLiquidityCleared: true,
         manipulationCleared: true,
@@ -1034,7 +1078,7 @@ export function computeSniperModel(
         sweptLiquidityVolumeLots: sweptUpperVolumeLots,
         opposingTargetPoolPrice: tp2,
         manipulationPhase: 'COMPLETE_RECLAIMED',
-        scannerStageLabel: `FULL 6-PILLAR CONFLUENCE LOCKED (${multiPillarConfluenceScore}/100) · NOT LIQUIDITY ONLY`,
+        scannerStageLabel: `FULL 7-PILLAR CONFLUENCE LOCKED (${multiPillarConfluenceScore}/100) · AVWAP COST BASIS DEFENDED`,
         fiveGateChecklist: [
           {
             id: 'G1',
@@ -1062,9 +1106,9 @@ export function computeSniperModel(
           },
           {
             id: 'G5',
-            label: 'Footprint + CVD + Compression Release',
+            label: 'Footprint + CVD + Anchored VWAP Defense',
             passed: true,
-            detail: `Bearish CVD divergence + ${marketMovingBlockCount} footprint blocks + ${mi.compression.atrContractionRatio}x ATR coil release (${multiPillarConfluenceScore}/100)`,
+            detail: `Bearish CVD divergence + Post-Sweep High AVWAP defended @ ${avwapSweepHigh.avwap.toFixed(digits)} + ${marketMovingBlockCount} footprint blocks`,
           },
         ],
       },
@@ -1125,14 +1169,23 @@ export function computeSniperModel(
       potentialPipsRisk: riskPips,
       potentialPipsReward: rewardPips,
       confidenceScore: 97,
-      playbookTrigger: 'PLAY A: Full-Model Confluence Long Flip (Liquidity Sweep + DOM Iceberg Absorption + CVD Divergence + Trapped Shorts)',
+      playbookTrigger: 'PLAY A: Full-Model Confluence Long Flip (Liquidity Sweep + DOM Iceberg Absorption + CVD Divergence + AVWAP Defense + Trapped Shorts)',
       reasons: [
         `1. Liquidity Sweep & Stop-Hunt Cleared: Downside sell-stops @ ${lowerAttractingPoolPrice.toFixed(digits)} (${sweptLowerVolumeLots} lots) swept & reclaimed above VAL (${val.toFixed(digits)})`,
         `2. DOM & Iceberg Passive Absorption: ${snapshot.leftBook.buyLimitPct}% buy limit mattress (${mi.liquidity.replenishmentBehavior.replace(/_/g, ' ')}) soaked up aggressive sellers with 0 downward continuation`,
         `3. Footprint & CVD Order-Flow Flip: Bullish delta divergence (${mi.orderFlow.cvdTrend.replace(/_/g, ' ')}) + ${marketMovingBlockCount} institutional footprint blocks confirm buyer control`,
         `4. Trapped Counterparty Liquidation Fuel: ${snapshot.rightBook.lossSellersPct}% late retail breakout shorts trapped at lows (${exhaustionScore}% seller exhaustion), fueling short squeeze`,
-        `5. Value Auction & Macro Alignment: ${mi.regime.primaryRegime.replace(/_/g, ' ')} regime (${multiPillarConfluenceScore}/100 confluence) pulling price to POC (${tp1.toFixed(digits)}) & VAH (${tp2.toFixed(digits)})`,
+        `5. Anchored VWAP Institutional Defense: Price holding firmly above Post-Sweep Low AVWAP (${avwapSweepLow.avwap.toFixed(digits)}), confirming institutional long cost basis is protected`,
+        `6. Value Auction & Macro Alignment: ${mi.regime.primaryRegime.replace(/_/g, ' ')} regime (${multiPillarConfluenceScore}/100 confluence) pulling price to POC (${tp1.toFixed(digits)}) & VAH (${tp2.toFixed(digits)})`,
       ],
+      anchoredVwapVerification: {
+        sweepAvwap: avwapSweepLow.avwap,
+        sessionAvwap: avwapSession.avwap,
+        climaxAvwap: avwapSweepLow.avwap,
+        isAligned: hasFloorAVWAPDefense,
+        institutionalCostDefended: hasFloorAVWAPDefense,
+        detail: `Price (${currentPrice.toFixed(digits)}) holding above Post-Sweep Low AVWAP (${avwapSweepLow.avwap.toFixed(digits)}); institutional long cost basis protected.`,
+      },
       liquiditySweepAudit: {
         allAttractingLiquidityCleared: true,
         manipulationCleared: true,
@@ -1140,7 +1193,7 @@ export function computeSniperModel(
         sweptLiquidityVolumeLots: sweptLowerVolumeLots,
         opposingTargetPoolPrice: tp2,
         manipulationPhase: 'COMPLETE_RECLAIMED',
-        scannerStageLabel: `FULL 6-PILLAR CONFLUENCE LOCKED (${multiPillarConfluenceScore}/100) · NOT LIQUIDITY ONLY`,
+        scannerStageLabel: `FULL 7-PILLAR CONFLUENCE LOCKED (${multiPillarConfluenceScore}/100) · AVWAP COST BASIS DEFENDED`,
         fiveGateChecklist: [
           {
             id: 'G1',
@@ -1168,9 +1221,9 @@ export function computeSniperModel(
           },
           {
             id: 'G5',
-            label: 'Footprint + CVD + Compression Release',
+            label: 'Footprint + CVD + Anchored VWAP Defense',
             passed: true,
-            detail: `Bullish CVD divergence + ${marketMovingBlockCount} footprint blocks + ${mi.compression.atrContractionRatio}x ATR coil release (${multiPillarConfluenceScore}/100)`,
+            detail: `Bullish CVD divergence + Post-Sweep Low AVWAP defended @ ${avwapSweepLow.avwap.toFixed(digits)} + ${marketMovingBlockCount} footprint blocks`,
           },
         ],
       },
@@ -1185,12 +1238,19 @@ export function computeSniperModel(
       ? vah
       : val;
 
+    // Dynamic micro order-flow calculation during balanced fair value consolidation
+    const lastDelta = candles[candles.length - 1]?.delta || 0;
+    const bookTilt = (snapshot.leftBook.buyLimitPct - snapshot.leftBook.sellLimitPct);
+    const dynamicOffset = Math.max(-12, Math.min(12, Math.round(lastDelta / 65 + bookTilt * 0.35)));
+    const dynamicBuyerPower = Math.max(38, Math.min(62, 50 + dynamicOffset));
+    const dynamicSellerPower = 100 - dynamicBuyerPower;
+
     exhaustion = {
-      exhaustedSide: 'BALANCED',
+      exhaustedSide: dynamicBuyerPower >= 56 ? 'BUYERS' : dynamicSellerPower >= 56 ? 'SELLERS' : 'BALANCED',
       exhaustionScore: 48,
       powerRemaining: 50,
-      buyerPower: 50,
-      sellerPower: 50,
+      buyerPower: dynamicBuyerPower,
+      sellerPower: dynamicSellerPower,
       status: 'BALANCED_PRESSURE',
       headline: isDriftingTowardUpperPool
         ? `PREMATURE SELL BLOCKED · UNSWEPT LIQUIDITY MAGNET @ ${vah.toFixed(digits)} STILL ATTRACTING PRICE`
@@ -1233,6 +1293,14 @@ export function computeSniperModel(
         `Manipulation Check: Waiting for stop-hunt / Judas swing beyond ${unclaimedMagnet.toFixed(digits)} to clear retail stops first`,
         `Instant Signal Armed: Signal will lock the moment ${unclaimedMagnet.toFixed(digits)} liquidity is taken out and absorbed`,
       ],
+      anchoredVwapVerification: {
+        sweepAvwap: avwapSweepLow.avwap,
+        sessionAvwap: avwapSession.avwap,
+        climaxAvwap: avwapSweepHigh.avwap,
+        isAligned: false,
+        institutionalCostDefended: false,
+        detail: `Awaiting structural anchor sweep. Session AVWAP @ ${avwapSession.avwap.toFixed(digits)}.`,
+      },
       liquiditySweepAudit: {
         allAttractingLiquidityCleared: false,
         manipulationCleared: false,
