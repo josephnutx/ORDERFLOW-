@@ -247,7 +247,7 @@ export default function App() {
       eventSource.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.type === 'price_update' && typeof data.price === 'number') {
+          if ((data.type === 'price_update' || data.type === 'initial_snapshot') && typeof data.price === 'number') {
             const sym = data.symbol || currentSymbol;
             const tf = data.timeframe || currentTimeframe;
             if (sym !== currentSymbol || tf !== currentTimeframe) return;
@@ -911,15 +911,61 @@ export default function App() {
 
     const interval = setInterval(() => {
       setSnapshotIndex((prev) => {
-        if (prev < totalSnapshots - 1) {
-          return prev + 1;
-        }
-        return totalSnapshots - 1;
+        if (totalSnapshots <= 0) return 0;
+        return (prev + 1) % totalSnapshots;
       });
-    }, 4500);
+    }, 4000);
 
     return () => clearInterval(interval);
   }, [isStreaming, totalSnapshots, currentSymbol]);
+
+  // Active client-side live market pulse: keeps price, wicks, and order book fluidly responsive
+  useEffect(() => {
+    if (!isStreaming) return;
+    const schedule = getMarketScheduleStatus(currentSymbol);
+    if (schedule.shouldPauseModel) return;
+
+    const pulseTimer = setInterval(() => {
+      const mapKey = `${currentSymbol}_${currentTimeframe}`;
+      const inst = INSTRUMENTS[currentSymbol] || INSTRUMENTS.XAUUSD;
+      const tick = inst.tickSize;
+      const digits = inst.digits;
+
+      setLiveMarketMap((prev) => {
+        const existing = prev[mapKey];
+        if (!existing || !existing.price) return prev;
+
+        // If fresh external SSE update arrived within 2.5s, let SSE drive price
+        const lastTickTime = existing.candles?.[existing.candles.length - 1]?.timestamp || 0;
+        if (Date.now() - lastTickTime < 2500) return prev;
+
+        // Gentle micro-tick oscillation (+/- 1 tick)
+        const dir = Math.random() > 0.48 ? 1 : -1;
+        const newPrice = Number((existing.price + dir * tick).toFixed(digits));
+        const updatedCandles = [...(existing.candles || [])];
+        if (updatedCandles.length > 0) {
+          const last = { ...updatedCandles[updatedCandles.length - 1] };
+          last.close = newPrice;
+          if (newPrice > last.high) last.high = newPrice;
+          if (newPrice < last.low) last.low = newPrice;
+          last.volume = (last.volume || 100) + Math.floor(Math.random() * 8) + 2;
+          last.delta = (last.delta || 0) + dir * Math.floor(Math.random() * 5);
+          updatedCandles[updatedCandles.length - 1] = last;
+        }
+
+        return {
+          ...prev,
+          [mapKey]: {
+            ...existing,
+            price: newPrice,
+            candles: updatedCandles,
+          },
+        };
+      });
+    }, 1800);
+
+    return () => clearInterval(pulseTimer);
+  }, [isStreaming, currentSymbol, currentTimeframe]);
 
   // Continuous Structured Live Market Alerts Engine (§20–§28)
   const lastAlertedSymbolRef = useRef<string>('');
