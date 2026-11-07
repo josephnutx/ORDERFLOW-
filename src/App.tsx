@@ -17,6 +17,7 @@ import {
   computeSniperModel, 
   INSTRUMENTS 
 } from './services/mockDataGenerator';
+import { SelfHealingErrorBoundary } from './components/SelfHealingErrorBoundary';
 import { getMarketScheduleStatus, MarketScheduleStatus } from './services/marketHoursService';
 import { 
   fetchLiveMarket, 
@@ -34,6 +35,8 @@ import { generateDynamicMarketPulse } from './services/fullModelAnalysisService'
 import { buildStructuredAlert, detectDynamicVisualTapeAlert, StructuredLiveAlert, AlertType } from './services/structuredAlertService';
 import { OrderBookSettings, OrderBookSnapshot, Candle, FootprintBubble } from './types/orderbook';
 import { SymbolTargetLifecycle } from './types/sniperModel';
+import { fetchForexFactoryCalendar, EconomicCalendarEvent } from './services/macroCalendarService';
+import { fetchLatestMarketNews, MarketNewsStory } from './services/marketNewsService';
 import { 
   BarChart3, 
   Eye, 
@@ -56,7 +59,9 @@ import {
   Check,
   Volume2,
   VolumeX,
-  Pause
+  Pause,
+  AlertTriangle,
+  Radio
 } from 'lucide-react';
 
 export interface AchievedSignalRecord {
@@ -145,7 +150,7 @@ export default function App() {
     },
   });
   const [dismissedSignals, setDismissedSignals] = useState<Record<string, boolean>>({});
-  const [toastMessage, setToastMessage] = useState<{ id: string; title: string; subtitle: string; pips?: number } | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ id: string; title: string; subtitle: string; pips?: number; type?: 'SUCCESS' | 'CRITICAL_NEWS' | 'ALERT' } | null>(null);
 
   // Fetch real market data on symbol or timeframe change
   const loadRealMarketData = useCallback(async (sym: string, tf: string = 'M5') => {
@@ -239,65 +244,106 @@ export default function App() {
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
     window.addEventListener('focus', handleVisibilityOrFocus);
 
-    // Subscribe to SSE Live Price Updates from TradingView for currentSymbol + currentTimeframe
+    // Autonomous Self-Healing SSE Live Stream Manager
     let eventSource: EventSource | null = null;
-    try {
-      eventSource = new EventSource(`/api/market/stream?symbol=${encodeURIComponent(currentSymbol)}&timeframe=${encodeURIComponent(currentTimeframe)}`);
-      
-      eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if ((data.type === 'price_update' || data.type === 'initial_snapshot') && typeof data.price === 'number') {
-            const sym = data.symbol || currentSymbol;
-            const tf = data.timeframe || currentTimeframe;
-            if (sym !== currentSymbol || tf !== currentTimeframe) return;
+    let isCleanedUp = false;
+    let lastMessageTime = Date.now();
 
-            const mapKey = `${sym}_${tf}`;
-            setIsLiveConnected(true);
+    const connectSSE = () => {
+      if (isCleanedUp) return;
+      if (eventSource) {
+        eventSource.close();
+      }
 
-            setLiveMarketMap((prev) => {
-              const existing = prev[mapKey];
-              const existingCandles = existing?.candles || [];
-              let updatedCandles = [...existingCandles];
+      try {
+        eventSource = new EventSource(`/api/market/stream?symbol=${encodeURIComponent(currentSymbol)}&timeframe=${encodeURIComponent(currentTimeframe)}`);
+        
+        eventSource.onmessage = (event) => {
+          lastMessageTime = Date.now();
+          try {
+            const data = JSON.parse(event.data);
+            if ((data.type === 'price_update' || data.type === 'initial_snapshot') && typeof data.price === 'number') {
+              const sym = data.symbol || currentSymbol;
+              const tf = data.timeframe || currentTimeframe;
+              if (sym !== currentSymbol || tf !== currentTimeframe) return;
 
-              if (data.latestCandle) {
-                if (updatedCandles.length === 0) {
-                  updatedCandles = [data.latestCandle];
-                } else {
-                  const last = updatedCandles[updatedCandles.length - 1];
-                  if (last && Math.abs(last.timestamp - data.latestCandle.timestamp) < 60000) {
-                    updatedCandles[updatedCandles.length - 1] = data.latestCandle;
-                  } else {
-                    updatedCandles.push(data.latestCandle);
-                    if (updatedCandles.length > 50) updatedCandles.shift();
-                  }
-                }
+              // Weekend / Market closure guard:
+              // For markets closed on weekends or halts, ignore tick movements and preserve stationary close price!
+              const schedule = getMarketScheduleStatus(sym);
+              if (data.type === 'price_update' && schedule.shouldPauseModel) {
+                return;
               }
 
-              return {
-                ...prev,
-                [mapKey]: {
-                  candles: updatedCandles,
-                  price: data.price,
-                  ticks: existing?.ticks || [],
-                },
-              };
-            });
-          }
-        } catch {
-          // Ignore parse errors on heartbeats
-        }
-      };
+              const mapKey = `${sym}_${tf}`;
+              setIsLiveConnected(true);
 
-      eventSource.onerror = () => {
-        // SSE handles reconnection automatically
-      };
-    } catch (err) {
-      console.warn('SSE stream init warning:', err);
-    }
+              setLiveMarketMap((prev) => {
+                const existing = prev[mapKey];
+                let updatedCandles = data.candles && Array.isArray(data.candles) && data.candles.length > 0
+                  ? data.candles
+                  : [...(existing?.candles || [])];
+
+                if (data.latestCandle) {
+                  if (updatedCandles.length === 0) {
+                    updatedCandles = [data.latestCandle];
+                  } else {
+                    const last = updatedCandles[updatedCandles.length - 1];
+                    if (last && Math.abs(last.timestamp - data.latestCandle.timestamp) < 60000) {
+                      updatedCandles[updatedCandles.length - 1] = data.latestCandle;
+                    } else {
+                      updatedCandles.push(data.latestCandle);
+                      if (updatedCandles.length > 50) updatedCandles.shift();
+                    }
+                  }
+                }
+
+                return {
+                  ...prev,
+                  [mapKey]: {
+                    candles: updatedCandles,
+                    price: data.price,
+                    ticks: existing?.ticks || [],
+                  },
+                };
+              });
+            }
+          } catch {
+            // Heartbeat or transient parse pulse
+          }
+        };
+
+        eventSource.onerror = () => {
+          // Autonomous recovery: attempt self-healing reconnect after 1.5s
+          if (!isCleanedUp) {
+            setTimeout(() => {
+              if (!isCleanedUp) {
+                connectSSE();
+                loadRealMarketData(currentSymbol, currentTimeframe);
+              }
+            }, 1500);
+          }
+        };
+      } catch (err) {
+        console.warn('[SelfHealingEngine] SSE init notice:', err);
+      }
+    };
+
+    connectSSE();
+
+    // Autonomous Watchdog: If no SSE messages or heartbeats received for > 16s, auto-heal connection
+    const sseWatchdog = setInterval(() => {
+      if (Date.now() - lastMessageTime > 16000 && !isCleanedUp) {
+        console.log('[SelfHealingEngine] SSE silence detected; auto-reconnecting stream...');
+        lastMessageTime = Date.now();
+        connectSSE();
+        loadRealMarketData(currentSymbol, currentTimeframe);
+      }
+    }, 5000);
 
     return () => {
+      isCleanedUp = true;
       clearInterval(autoRefreshTimer);
+      clearInterval(sseWatchdog);
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
       window.removeEventListener('focus', handleVisibilityOrFocus);
       if (eventSource) {
@@ -365,8 +411,19 @@ export default function App() {
     return marketData.bubbles;
   }, [effectiveTicks, effectiveCandles, currentInst, marketData.bubbles, currentTimeframe]);
 
-  // Current effective price strictly scoped to currentSymbol
-  const effectivePrice: number = currentLiveData?.price ?? currentSnapshot.currentPrice;
+  // Current effective price strictly scoped to currentSymbol with autonomous sanity self-healing
+  const rawCandidatePrice = currentLiveData?.price ?? currentSnapshot.currentPrice;
+  const basePrice = currentInst.basePrice;
+  const effectivePrice: number = useMemo(() => {
+    if (typeof rawCandidatePrice === 'number' && !isNaN(rawCandidatePrice) && rawCandidatePrice > 0) {
+      // If candidate price is abnormally aberrant (>40% off instrument baseline), self-heal to baseline
+      if (Math.abs(rawCandidatePrice - basePrice) / basePrice > 0.40) {
+        return basePrice;
+      }
+      return rawCandidatePrice;
+    }
+    return basePrice;
+  }, [rawCandidatePrice, basePrice]);
 
   // Real OrderBook snapshot aligned to live price and Dukascopy tick sentiment
   const effectiveSnapshot: OrderBookSnapshot = useMemo(() => {
@@ -765,12 +822,13 @@ export default function App() {
   const symbolChangeTimeRef = useRef<number>(Date.now());
   const lastGlobalAlertTimeRef = useRef<number>(0);
 
-  // Auto-dismiss toast notifications after 5.5 seconds so they never linger or stack on screen
+  // Auto-dismiss toast notifications after 5.5s (8s for critical news) so they never linger or stack on screen
   useEffect(() => {
     if (!toastMessage) return;
+    const duration = toastMessage.type === 'CRITICAL_NEWS' ? 8000 : 5500;
     const timer = setTimeout(() => {
       setToastMessage(null);
-    }, 5500);
+    }, duration);
     return () => clearTimeout(timer);
   }, [toastMessage]);
 
@@ -909,14 +967,9 @@ export default function App() {
       return;
     }
 
-    const interval = setInterval(() => {
-      setSnapshotIndex((prev) => {
-        if (totalSnapshots <= 0) return 0;
-        return (prev + 1) % totalSnapshots;
-      });
-    }, 4000);
-
-    return () => clearInterval(interval);
+    // When streaming live, keep snapshotIndex locked to the latest real-time snapshot
+    // (Never automatically cycle into the past, which caused a 2-hour historical lag)
+    setSnapshotIndex(Math.max(0, totalSnapshots - 1));
   }, [isStreaming, totalSnapshots, currentSymbol]);
 
   // Active client-side live market pulse: keeps price, wicks, and order book fluidly responsive
@@ -1187,6 +1240,8 @@ export default function App() {
   const lastImbalanceSpokenTimeRef = useRef<number>(Date.now());
   const lastAutoPulseTimeRef = useRef<number>(Date.now());
   const lastSpokenBubbleIdRef = useRef<string>('');
+  const alertedNewsEventIdsRef = useRef<Set<string>>(new Set());
+  const alertedBreakingStoryIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (lastSymbolRef.current !== currentSymbol && effectivePrice > 0) {
@@ -1399,6 +1454,186 @@ export default function App() {
     modelOutput,
   ]);
 
+  // Instant Critical News & High-Impact Macro Release Alert Engine
+  // Continuously monitors economic calendar releases and breaking news wire every 10s.
+  // Instantly sounds an authoritative voice squawk and displays a prominent visual banner on:
+  // 1. T <= 5m: Approaching high-impact catalyst (NFP, CPI, FOMC, Rate decisions, Retail Sales, Unemployment)
+  // 2. T <= 0m: Immediate breaking data drop (with actual vs forecast comparison and surprise direction)
+  // 3. Breaking tier-one financial wire updates
+  useEffect(() => {
+    let isCancelled = false;
+
+    const checkCriticalNewsReleases = async () => {
+      try {
+        const events = await fetchForexFactoryCalendar(currentSymbol);
+        if (isCancelled || !events || events.length === 0) return;
+
+        const now = Date.now();
+        const symUpper = currentSymbol.toUpperCase();
+
+        // Relevant currencies for current instrument
+        const relevantCurrencies = new Set<string>();
+        if (symUpper.includes('USD') || symUpper === 'XAUUSD' || symUpper === 'BTCUSD' || symUpper.startsWith('US') || symUpper.startsWith('NAS')) {
+          relevantCurrencies.add('USD');
+        }
+        if (symUpper.includes('EUR') || symUpper === 'GER40') relevantCurrencies.add('EUR');
+        if (symUpper.includes('GBP') || symUpper === 'UK100') relevantCurrencies.add('GBP');
+        if (symUpper.includes('JPY')) relevantCurrencies.add('JPY');
+        if (symUpper.includes('CAD')) relevantCurrencies.add('CAD');
+        if (symUpper.includes('AUD')) relevantCurrencies.add('AUD');
+
+        for (const ev of events) {
+          if (!relevantCurrencies.has(ev.currency)) continue;
+          if (!ev.isHighImpact && ev.impact !== 'HIGH') continue;
+
+          const minutesUntil = Math.round((ev.eventTime - now) / 60000);
+
+          // Milestone 1: IMMINENT RELEASE (5 minutes or less before drop)
+          if (minutesUntil <= 5 && minutesUntil > 0) {
+            const milestoneKey = `imminent-5m-${ev.id}`;
+            if (!alertedNewsEventIdsRef.current.has(milestoneKey)) {
+              alertedNewsEventIdsRef.current.add(milestoneKey);
+              lastGlobalAlertTimeRef.current = now;
+
+              const newsAlert = buildStructuredAlert(
+                'NEWS',
+                currentSymbol,
+                effectivePrice,
+                modelOutput,
+                modelOutput.marketIntelligence,
+                { newsEvent: ev }
+              );
+
+              setLiveStructuredAlerts((prev) => [
+                newsAlert,
+                ...prev.filter((a) => !(a.symbol === newsAlert.symbol && a.id === newsAlert.id)),
+              ].slice(0, 30));
+
+              setToastMessage({
+                id: newsAlert.id,
+                title: `🚨 CRITICAL NEWS RELEASING IN ${minutesUntil}M!`,
+                subtitle: `${ev.currency} ${ev.eventTitle} releases in ${minutesUntil}m. Order book depth is thinning. Prepare for Phase 1 sweeps.`,
+                type: 'CRITICAL_NEWS',
+              });
+
+              playTargetHitSound('ALERT');
+              if (isVoiceAlertsEnabled) {
+                tradingVoice.speak(
+                  `Attention traders: High impact economic catalyst approaching. ${ev.currency} ${ev.eventTitle} releases in ${minutesUntil} minute${minutesUntil === 1 ? '' : 's'}. Order book depth is thinning. Exercise extreme discipline.`,
+                  {
+                    priority: true,
+                    force: true,
+                    category: 'STRUCTURED_ALERT',
+                    symbol: currentSymbol,
+                  }
+                );
+              }
+              break;
+            }
+          }
+
+          // Milestone 2: BREAKING RELEASE DROP (0 to 3 minutes after drop)
+          if (minutesUntil <= 0 && minutesUntil >= -3) {
+            const milestoneKey = `released-${ev.id}`;
+            if (!alertedNewsEventIdsRef.current.has(milestoneKey)) {
+              alertedNewsEventIdsRef.current.add(milestoneKey);
+              lastGlobalAlertTimeRef.current = now;
+
+              const newsAlert = buildStructuredAlert(
+                'NEWS',
+                currentSymbol,
+                effectivePrice,
+                modelOutput,
+                modelOutput.marketIntelligence,
+                { newsEvent: ev }
+              );
+
+              setLiveStructuredAlerts((prev) => [
+                newsAlert,
+                ...prev.filter((a) => !(a.symbol === newsAlert.symbol && a.id === newsAlert.id)),
+              ].slice(0, 30));
+
+              const surpriseText = ev.surpriseValue && ev.surpriseValue > 0
+                ? 'Hot upside surprise reported.'
+                : ev.surpriseValue && ev.surpriseValue < 0
+                ? 'Downside miss reported.'
+                : 'Reported in line with consensus.';
+
+              const modelBiasHint = modelOutput.sniperEdge.isEdgeQualified
+                ? (modelOutput.sniperEdge.triggerAction === 'SNIPER_BUY' ? 'Model order flow confirms Buy advantage.' : 'Model order flow confirms Sell advantage.')
+                : 'Model recommends standing down to observe post-news value acceptance.';
+
+              setToastMessage({
+                id: newsAlert.id,
+                title: `⚡ BREAKING NEWS RELEASE: ${ev.currency} ${ev.eventTitle}`,
+                subtitle: `Actual: ${ev.actual || 'Out'} vs Forecast: ${ev.forecast || 'N/A'}. ${surpriseText} Volatility sweep active!`,
+                type: 'CRITICAL_NEWS',
+              });
+
+              playTargetHitSound('ALERT');
+              if (isVoiceAlertsEnabled) {
+                tradingVoice.speak(
+                  `Breaking News Release! ${ev.currency} ${ev.eventTitle} has just dropped. Actual ${ev.actual || 'reported'} versus forecast ${ev.forecast || 'consensus'}. ${surpriseText} ${modelBiasHint}`,
+                  {
+                    priority: true,
+                    force: true,
+                    category: 'STRUCTURED_ALERT',
+                    symbol: currentSymbol,
+                  }
+                );
+              }
+              break;
+            }
+          }
+        }
+
+        // Also check breaking wire news
+        const stories = await fetchLatestMarketNews(currentSymbol);
+        if (isCancelled || !stories || stories.length === 0) return;
+
+        for (const story of stories.slice(0, 5)) {
+          if (story.impact === 'HIGH' || story.isBreaking) {
+            const wireKey = `wire-${story.id}`;
+            if (!alertedBreakingStoryIdsRef.current.has(wireKey)) {
+              alertedBreakingStoryIdsRef.current.add(wireKey);
+              if (now - story.timestamp < 10 * 60 * 1000) {
+                lastGlobalAlertTimeRef.current = now;
+                setToastMessage({
+                  id: `story-${story.id}`,
+                  title: `📰 BREAKING NEWS WIRE: ${story.source}`,
+                  subtitle: story.headline,
+                  type: 'CRITICAL_NEWS',
+                });
+                playTargetHitSound('ALERT');
+                if (isVoiceAlertsEnabled) {
+                  tradingVoice.speak(
+                    `Breaking financial wire: ${story.headline}. Impact: High.`,
+                    {
+                      priority: true,
+                      category: 'STRUCTURED_ALERT',
+                      symbol: currentSymbol,
+                    }
+                  );
+                }
+                break;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[NewsSurveillanceEngine] Notice:', err);
+      }
+    };
+
+    checkCriticalNewsReleases();
+    const interval = setInterval(checkCriticalNewsReleases, 10000);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
+  }, [currentSymbol, effectivePrice, modelOutput, isVoiceAlertsEnabled]);
+
   return (
     <div className="min-h-screen bg-[#070a10] text-[#e2e8f0] flex flex-col font-sans">
       {/* 1. Header (Follows Top Bar Contract) */}
@@ -1594,7 +1829,7 @@ export default function App() {
                         <button
                           onClick={() => handleHitTarget(currentSymbol, 'TP2')}
                           className="px-2.5 py-1 text-xs font-bold rounded bg-emerald-500 hover:bg-emerald-400 text-black cursor-pointer shadow-xs transition-colors"
-                          title="Simulate hitting TP2 (Locks runner profit, targets TP3)"
+                          title="Advance to TP2 (Locks runner profit, targets TP3)"
                         >
                           Hit TP2 (+{tp2Pips}p)
                         </button>
@@ -1630,91 +1865,101 @@ export default function App() {
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 bg-[#0a0e17] rounded-lg border border-[#162136] overflow-hidden shadow-lg">
               {/* Left/Center: Candlestick & Footprint Chart (7-8 cols) */}
               <div className="lg:col-span-8 p-1 sm:p-2 flex flex-col">
-                <CandleChartWithBubbles
-                  candles={effectiveCandles}
-                  bubbles={effectiveBubbles}
-                  snapshot={effectiveSnapshot}
-                  snapshotIndex={snapshotIndex}
-                  totalSnapshots={totalSnapshots}
-                  onSelectSnapshotIndex={setSnapshotIndex}
-                  modelOutput={modelOutput}
-                  showBubbles={settings.showFootprintBubbles}
-                  onDismissSignal={handleDismissSignal}
-                  isSignalDismissed={!!currentLifecycle?.allTargetsCompleted || !!achievedSignals[currentSymbol] || !!dismissedSignals[currentSymbol] || !!currentLifecycle?.waitingForNextSetup}
-                  lifecycle={currentLifecycle}
-                  onHitTarget={handleHitTarget}
-                  onCompleteAllTargets={handleCompleteAllTargets}
-                  onTriggerNextSetup={handleTriggerNextSetup}
-                  onInstantBriefing={handleInstantBriefing}
-                  onOpenVoiceSettings={() => setIsVoiceModalOpen(true)}
-                />
+                <SelfHealingErrorBoundary moduleName="Footprint & Candlestick Chart">
+                  <CandleChartWithBubbles
+                    candles={effectiveCandles}
+                    bubbles={effectiveBubbles}
+                    snapshot={effectiveSnapshot}
+                    snapshotIndex={snapshotIndex}
+                    totalSnapshots={totalSnapshots}
+                    onSelectSnapshotIndex={setSnapshotIndex}
+                    modelOutput={modelOutput}
+                    showBubbles={settings.showFootprintBubbles}
+                    onDismissSignal={handleDismissSignal}
+                    isSignalDismissed={!!currentLifecycle?.allTargetsCompleted || !!achievedSignals[currentSymbol] || !!dismissedSignals[currentSymbol] || !!currentLifecycle?.waitingForNextSetup}
+                    lifecycle={currentLifecycle}
+                    onHitTarget={handleHitTarget}
+                    onCompleteAllTargets={handleCompleteAllTargets}
+                    onTriggerNextSetup={handleTriggerNextSetup}
+                    onInstantBriefing={handleInstantBriefing}
+                    onOpenVoiceSettings={() => setIsVoiceModalOpen(true)}
+                  />
+                </SelfHealingErrorBoundary>
               </div>
 
               {/* Right: Two-Sided OrderBook Indicator (4 cols, matching indctr.PNG) */}
               <div className="lg:col-span-4 min-h-[460px] lg:min-h-[520px] flex flex-col">
-                <OrderBookIndicator
-                  snapshot={effectiveSnapshot}
-                  snapshotIndex={snapshotIndex}
-                  totalSnapshots={totalSnapshots}
-                  onSelectSnapshotIndex={setSnapshotIndex}
-                  settings={settings}
-                  onUpdateSettings={handleUpdateSettings}
-                  isStreaming={isStreaming}
-                  onToggleStreaming={() => setIsStreaming(!isStreaming)}
-                  onOpenSettings={() => setIsSettingsOpen(true)}
-                  marketIntelligence={modelOutput.marketIntelligence}
-                />
+                <SelfHealingErrorBoundary moduleName="Institutional Order Book">
+                  <OrderBookIndicator
+                    snapshot={effectiveSnapshot}
+                    snapshotIndex={snapshotIndex}
+                    totalSnapshots={totalSnapshots}
+                    onSelectSnapshotIndex={setSnapshotIndex}
+                    settings={settings}
+                    onUpdateSettings={handleUpdateSettings}
+                    isStreaming={isStreaming}
+                    onToggleStreaming={() => setIsStreaming(!isStreaming)}
+                    onOpenSettings={() => setIsSettingsOpen(true)}
+                    marketIntelligence={modelOutput.marketIntelligence}
+                  />
+                </SelfHealingErrorBoundary>
               </div>
             </div>
 
             {/* Unified Non-Repeating Section 2: Exhaustion Gauges, 5-Gate Pre-Signal Liquidity Scanner & 13-Pair Radar */}
             <div className="w-full">
-              <SniperEdgeRadar
-                currentSymbol={currentSymbol}
-                instrument={currentInst}
-                modelOutput={modelOutput}
-                currentPrice={effectivePrice}
-                onSelectSymbol={(sym) => {
-                  setCurrentSymbol(sym);
-                  setSnapshotIndex(23);
-                }}
-                onOpenScorecard={() => setIsScorecardOpen(true)}
-                onDismissSignal={handleDismissSignal}
-                onMarkAchieved={handleHitTarget}
-                onResetSignal={handleResetSignal}
-                onJumpToNextSetup={handleJumpToNextSetup}
-                onTriggerNextSetup={handleTriggerNextSetup}
-                isSignalDismissed={!!currentLifecycle?.allTargetsCompleted || !!achievedSignals[currentSymbol] || !!dismissedSignals[currentSymbol] || !!currentLifecycle?.waitingForNextSetup}
-                lifecycle={currentLifecycle}
-                achievedSignalsRecord={achievedSignals}
-                targetLifecyclesRecord={targetLifecycles}
-                embeddedMode={true}
-                currentTimeframe={currentTimeframe}
-              />
+              <SelfHealingErrorBoundary moduleName="Sniper Edge Liquidity Radar">
+                <SniperEdgeRadar
+                  currentSymbol={currentSymbol}
+                  instrument={currentInst}
+                  modelOutput={modelOutput}
+                  currentPrice={effectivePrice}
+                  onSelectSymbol={(sym) => {
+                    setCurrentSymbol(sym);
+                    setSnapshotIndex(23);
+                  }}
+                  onOpenScorecard={() => setIsScorecardOpen(true)}
+                  onDismissSignal={handleDismissSignal}
+                  onMarkAchieved={handleHitTarget}
+                  onResetSignal={handleResetSignal}
+                  onJumpToNextSetup={handleJumpToNextSetup}
+                  onTriggerNextSetup={handleTriggerNextSetup}
+                  isSignalDismissed={!!currentLifecycle?.allTargetsCompleted || !!achievedSignals[currentSymbol] || !!dismissedSignals[currentSymbol] || !!currentLifecycle?.waitingForNextSetup}
+                  lifecycle={currentLifecycle}
+                  achievedSignalsRecord={achievedSignals}
+                  targetLifecyclesRecord={targetLifecycles}
+                  embeddedMode={true}
+                  currentTimeframe={currentTimeframe}
+                />
+              </SelfHealingErrorBoundary>
             </div>
 
             {/* Unified Non-Repeating Section 3: Live Infographic, G0–G6 Pipeline, Market Auction & Macro News Engine */}
             <div className="w-full bg-[#0a0e17] rounded-lg border border-[#162136] p-3 shadow-lg">
-              <InfographicEngine
-                modelOutput={modelOutput}
-                onOpenScorecard={() => setIsScorecardOpen(true)}
-                digits={currentInst.digits}
-                currentSymbol={currentSymbol}
-              />
+              <SelfHealingErrorBoundary moduleName="Macro Intelligence & Playbook Engine">
+                <InfographicEngine
+                  modelOutput={modelOutput}
+                  onOpenScorecard={() => setIsScorecardOpen(true)}
+                  digits={currentInst.digits}
+                  currentSymbol={currentSymbol}
+                />
+              </SelfHealingErrorBoundary>
             </div>
 
             {/* Unified Non-Repeating Section 4: Bookmap Liquidity Depth Visualizer */}
             <div className="w-full">
-              <LiquidityHeatmapVisualizer
-                candles={effectiveCandles}
-                instrument={currentInst}
-                modelOutput={modelOutput}
-                currentPrice={effectivePrice}
-                onSelectSymbol={(sym) => {
-                  setCurrentSymbol(sym);
-                  setSnapshotIndex(23);
-                }}
-              />
+              <SelfHealingErrorBoundary moduleName="Bookmap Liquidity Depth Matrix">
+                <LiquidityHeatmapVisualizer
+                  candles={effectiveCandles}
+                  instrument={currentInst}
+                  modelOutput={modelOutput}
+                  currentPrice={effectivePrice}
+                  onSelectSymbol={(sym) => {
+                    setCurrentSymbol(sym);
+                    setSnapshotIndex(23);
+                  }}
+                />
+              </SelfHealingErrorBoundary>
             </div>
           </div>
         )}
@@ -1795,29 +2040,83 @@ export default function App() {
         modelOutput={modelOutput}
       />
 
-      {/* Target Achieved Celebratory Floating Toast */}
+      {/* Dynamic Floating Toast: Critical News Alert vs Target Achieved */}
       {toastMessage && (
-        <div className="fixed bottom-3 sm:bottom-6 right-3 sm:right-6 left-3 sm:left-auto z-50 max-w-md bg-[#041a13] border-2 border-emerald-500 text-white p-3 sm:p-4 rounded-xl shadow-2xl shadow-emerald-950/80 flex items-start gap-3 backdrop-blur-md">
-          <div className="w-9 h-9 rounded-full bg-emerald-500/20 border border-emerald-500 flex items-center justify-center shrink-0">
-            <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+        <div className={`fixed bottom-3 sm:bottom-6 right-3 sm:right-6 left-3 sm:left-auto z-50 max-w-md text-white p-3 sm:p-4 rounded-xl shadow-2xl flex items-start gap-3 backdrop-blur-md transition-all duration-300 animate-in fade-in slide-in-from-bottom-3 ${
+          toastMessage.type === 'CRITICAL_NEWS'
+            ? 'bg-[#180808] border-2 border-rose-500 shadow-rose-950/80'
+            : toastMessage.type === 'ALERT'
+            ? 'bg-[#181205] border-2 border-amber-500 shadow-amber-950/80'
+            : 'bg-[#041a13] border-2 border-emerald-500 shadow-emerald-950/80'
+        }`}>
+          <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 border ${
+            toastMessage.type === 'CRITICAL_NEWS'
+              ? 'bg-rose-500/20 border-rose-500'
+              : toastMessage.type === 'ALERT'
+              ? 'bg-amber-500/20 border-amber-500'
+              : 'bg-emerald-500/20 border-emerald-500'
+          }`}>
+            {toastMessage.type === 'CRITICAL_NEWS' ? (
+              <AlertTriangle className="w-5 h-5 text-rose-400 animate-pulse" />
+            ) : toastMessage.type === 'ALERT' ? (
+              <Radio className="w-5 h-5 text-amber-400 animate-pulse" />
+            ) : (
+              <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+            )}
           </div>
           <div className="flex-1">
-            <h4 className="text-sm font-bold text-emerald-300">{toastMessage.title}</h4>
+            <div className="flex items-center gap-2">
+              <h4 className={`text-sm font-bold ${
+                toastMessage.type === 'CRITICAL_NEWS'
+                  ? 'text-rose-300'
+                  : toastMessage.type === 'ALERT'
+                  ? 'text-amber-300'
+                  : 'text-emerald-300'
+              }`}>{toastMessage.title}</h4>
+              {toastMessage.type === 'CRITICAL_NEWS' && (
+                <span className="px-1.5 py-0.5 text-[10px] font-mono font-black uppercase rounded bg-rose-500 text-black animate-pulse">
+                  INSTANT
+                </span>
+              )}
+            </div>
             <p className="text-xs text-slate-300 mt-1 leading-relaxed">{toastMessage.subtitle}</p>
             <div className="mt-3 flex items-center gap-2">
-              <button
-                onClick={handleJumpToNextSetup}
-                className="px-3 py-1 text-xs font-bold rounded bg-emerald-500 text-black hover:bg-emerald-400 transition-colors flex items-center gap-1 shadow-xs"
-              >
-                <Target className="w-3.5 h-3.5" />
-                <span>Find Next Setup</span>
-              </button>
-              <button
-                onClick={() => setToastMessage(null)}
-                className="px-2.5 py-1 text-xs text-slate-400 hover:text-white"
-              >
-                Dismiss
-              </button>
+              {toastMessage.type === 'CRITICAL_NEWS' ? (
+                <>
+                  <button
+                    onClick={() => {
+                      setActiveView('intelligence');
+                      setToastMessage(null);
+                    }}
+                    className="px-3 py-1 text-xs font-bold rounded bg-rose-500 text-white hover:bg-rose-400 transition-colors flex items-center gap-1 shadow-xs"
+                  >
+                    <Radio className="w-3.5 h-3.5" />
+                    <span>View News Catalyst</span>
+                  </button>
+                  <button
+                    onClick={() => setToastMessage(null)}
+                    className="px-2.5 py-1 text-xs text-slate-400 hover:text-white"
+                  >
+                    Acknowledge
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={handleJumpToNextSetup}
+                    className="px-3 py-1 text-xs font-bold rounded bg-emerald-500 text-black hover:bg-emerald-400 transition-colors flex items-center gap-1 shadow-xs"
+                  >
+                    <Target className="w-3.5 h-3.5" />
+                    <span>Find Next Setup</span>
+                  </button>
+                  <button
+                    onClick={() => setToastMessage(null)}
+                    className="px-2.5 py-1 text-xs text-slate-400 hover:text-white"
+                  >
+                    Dismiss
+                  </button>
+                </>
+              )}
             </div>
           </div>
           <button

@@ -380,6 +380,35 @@ Countdown: ${pred.countdownFormatted} (${localTime.fullLocalDisplay})
         </div>
       </div>
 
+      {/* Category Filter Pills (When in Upcoming view) */}
+      {activeTab === 'UPCOMING' && (
+        <div className="px-4 py-2 bg-[#080d19] border-b border-[#141e32] flex items-center gap-1.5 overflow-x-auto text-[11px] font-mono scrollbar-none">
+          <span className="text-slate-500 font-semibold uppercase tracking-wider text-[10px] mr-1">Catalysts:</span>
+          {(['ALL', 'NFP', 'FOMC', 'CPI', 'RETAIL', 'CLAIMS', 'OTHER'] as const).map((cat) => {
+            const count = cat === 'ALL' ? predictions.length : predictions.filter((p) => p.category === cat).length;
+            if (count === 0 && cat !== 'ALL') return null;
+            return (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-2.5 py-0.5 rounded-full font-medium transition-all flex items-center gap-1 shrink-0 ${
+                  selectedCategory === cat
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'bg-[#101726] hover:bg-[#162136] text-slate-400 hover:text-slate-200 border border-[#1b2742]'
+                }`}
+              >
+                {cat === 'NFP' && <span>🔥</span>}
+                {cat === 'FOMC' && <span>⚡</span>}
+                <span>{cat}</span>
+                <span className={`text-[9px] px-1 rounded ${selectedCategory === cat ? 'bg-indigo-700 text-white' : 'bg-[#182338] text-slate-400'}`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {activeTab === 'UPCOMING' ? (
         <div className="p-3.5 space-y-2.5">
           {filteredPredictions.length === 0 ? (

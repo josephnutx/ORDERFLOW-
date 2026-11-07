@@ -1,4 +1,5 @@
 import { EconomicCalendarEvent, MacroNewsIntelligence } from '../types/marketIntelligence';
+export type { EconomicCalendarEvent, MacroNewsIntelligence };
 
 // Stable cache of curated macro calendar events per symbol to prevent constant rerendering/flicker
 const calendarCache: Record<string, { events: EconomicCalendarEvent[]; timestamp: number }> = {};

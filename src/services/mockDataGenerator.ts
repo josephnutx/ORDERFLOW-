@@ -30,7 +30,7 @@ export const INSTRUMENTS: Record<string, InstrumentConfig> = {
     symbol: 'XAUUSD',
     name: 'Gold vs US Dollar',
     type: 'metals',
-    basePrice: 2742.50,
+    basePrice: 4070.50,
     tickSize: 0.1,
     pipMultiplier: 10,
     digits: 2,
@@ -41,7 +41,7 @@ export const INSTRUMENTS: Record<string, InstrumentConfig> = {
     symbol: 'BTCUSD',
     name: 'Bitcoin / US Dollar',
     type: 'crypto',
-    basePrice: 67450.0,
+    basePrice: 76136.0,
     tickSize: 1.0,
     pipMultiplier: 1,
     digits: 1,
@@ -54,7 +54,7 @@ export const INSTRUMENTS: Record<string, InstrumentConfig> = {
     symbol: 'EURUSD',
     name: 'Euro / US Dollar',
     type: 'forex',
-    basePrice: 1.0845,
+    basePrice: 1.1177,
     tickSize: 0.0001,
     pipMultiplier: 10000,
     digits: 5,
@@ -65,7 +65,7 @@ export const INSTRUMENTS: Record<string, InstrumentConfig> = {
     symbol: 'GBPUSD',
     name: 'British Pound / US Dollar',
     type: 'forex',
-    basePrice: 1.2985,
+    basePrice: 1.3400,
     tickSize: 0.0001,
     pipMultiplier: 10000,
     digits: 5,
@@ -76,7 +76,7 @@ export const INSTRUMENTS: Record<string, InstrumentConfig> = {
     symbol: 'USDJPY',
     name: 'US Dollar / Japanese Yen',
     type: 'forex',
-    basePrice: 152.65,
+    basePrice: 158.24,
     tickSize: 0.01,
     pipMultiplier: 100,
     digits: 3,
@@ -87,7 +87,7 @@ export const INSTRUMENTS: Record<string, InstrumentConfig> = {
     symbol: 'AUDUSD',
     name: 'Australian Dollar / US Dollar',
     type: 'forex',
-    basePrice: 0.6580,
+    basePrice: 0.6874,
     tickSize: 0.0001,
     pipMultiplier: 10000,
     digits: 5,
@@ -98,7 +98,7 @@ export const INSTRUMENTS: Record<string, InstrumentConfig> = {
     symbol: 'USDCAD',
     name: 'US Dollar / Canadian Dollar',
     type: 'forex',
-    basePrice: 1.3860,
+    basePrice: 1.4060,
     tickSize: 0.0001,
     pipMultiplier: 10000,
     digits: 5,
@@ -109,7 +109,7 @@ export const INSTRUMENTS: Record<string, InstrumentConfig> = {
     symbol: 'USDCHF',
     name: 'US Dollar / Swiss Franc',
     type: 'forex',
-    basePrice: 0.8655,
+    basePrice: 0.8180,
     tickSize: 0.0001,
     pipMultiplier: 10000,
     digits: 5,
@@ -122,7 +122,7 @@ export const INSTRUMENTS: Record<string, InstrumentConfig> = {
     symbol: 'NAS100',
     name: 'Nasdaq 100 / US Tech Index',
     type: 'indices',
-    basePrice: 20485.50,
+    basePrice: 27052.50,
     tickSize: 0.25,
     pipMultiplier: 4,
     digits: 2,
@@ -133,7 +133,7 @@ export const INSTRUMENTS: Record<string, InstrumentConfig> = {
     symbol: 'US500',
     name: 'S&P 500 Index',
     type: 'indices',
-    basePrice: 5865.25,
+    basePrice: 7380.50,
     tickSize: 0.25,
     pipMultiplier: 4,
     digits: 2,
@@ -144,7 +144,7 @@ export const INSTRUMENTS: Record<string, InstrumentConfig> = {
     symbol: 'US30',
     name: 'Dow Jones Industrial 30',
     type: 'indices',
-    basePrice: 42920.0,
+    basePrice: 51062.0,
     tickSize: 1.0,
     pipMultiplier: 1,
     digits: 1,
@@ -155,7 +155,7 @@ export const INSTRUMENTS: Record<string, InstrumentConfig> = {
     symbol: 'GER40',
     name: 'DAX 40 (Germany)',
     type: 'indices',
-    basePrice: 19480.0,
+    basePrice: 21450.0,
     tickSize: 0.5,
     pipMultiplier: 2,
     digits: 1,
@@ -166,7 +166,7 @@ export const INSTRUMENTS: Record<string, InstrumentConfig> = {
     symbol: 'UK100',
     name: 'FTSE 100 (UK)',
     type: 'indices',
-    basePrice: 8245.0,
+    basePrice: 8720.0,
     tickSize: 0.5,
     pipMultiplier: 2,
     digits: 1,
@@ -843,8 +843,9 @@ export function computeSniperModel(
 
   // Verify whether the attracting liquidity pool at the extreme has actually been swept & manipulation reclaimed
   // AND corroborated by Order Flow (Delta/CVD), DOM Wall Absorption, Iceberg Refills, Trapped Counterparties, and AVWAP Defense
-  const isAtUpperLiquidityZone = currentPrice >= vah - range * 0.12 || (wickHigh >= vah - range * 0.04 && currentPrice >= poc + range * 0.14);
-  const isAtLowerLiquidityZone = currentPrice <= val + range * 0.12 || (wickLow <= val + range * 0.04 && currentPrice <= poc - range * 0.14);
+  // Must be genuinely at the structural Value Area extreme (not in fair value chop near POC)
+  const isAtUpperLiquidityZone = currentPrice >= vah - range * 0.05 || (wickHigh >= vah - range * 0.02 && currentPrice >= vah - range * 0.08);
+  const isAtLowerLiquidityZone = currentPrice <= val + range * 0.05 || (wickLow <= val + range * 0.02 && currentPrice <= val + range * 0.08);
 
   const isCeilingEdge = isAtUpperLiquidityZone && hasSellWall && hasAbsorptionConfluence && hasOrderFlowConfluence && hasTrapConfluence && hasCeilingAVWAPDefense;
   const isFloorEdge = !isCeilingEdge && isAtLowerLiquidityZone && hasBuyWall && hasAbsorptionConfluence && hasOrderFlowConfluence && hasTrapConfluence && hasFloorAVWAPDefense;

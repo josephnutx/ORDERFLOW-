@@ -123,67 +123,74 @@ export function calculatePairSpecificImpact(
   let badgeColor: PairSpecificImpact['badgeColor'] = 'emerald';
   let confidenceScore = 84;
   let excursionDisplay = '45 - 65 pips';
+  const cat = eventCategory.toUpperCase();
+  const isTier1SuperEvent = cat === 'NFP' || cat === 'FOMC';
 
-  // Calibration per asset class
+  // Calibration per asset class & release category
   if (inst.type === 'metals') {
     directionalBias = 'STRONG_BULLISH';
-    impactBadge = 'GOLD BULLISH SURGE';
+    impactBadge = isTier1SuperEvent ? (cat === 'NFP' ? 'NFP BULLION LIQUIDITY SQUEEZE' : 'FOMC GOLD EXPANSION') : 'GOLD BULLISH SURGE';
     badgeColor = 'emerald';
-    confidenceScore = 88;
-    excursionDisplay = '$18.00 - $28.00';
+    confidenceScore = isTier1SuperEvent ? 90 : 86;
+    excursionDisplay = isTier1SuperEvent ? '$28.00 - $45.00' : '$18.00 - $28.00';
   } else if (inst.type === 'crypto') {
     directionalBias = 'BULLISH';
-    impactBadge = 'CRYPTO LIQUIDITY EXPANSION';
+    impactBadge = isTier1SuperEvent ? 'TIER-1 CRYPTO LIQUIDITY INJECTION' : 'CRYPTO LIQUIDITY EXPANSION';
     badgeColor = 'cyan';
-    confidenceScore = 82;
-    excursionDisplay = '$1,200 - $2,400';
+    confidenceScore = isTier1SuperEvent ? 85 : 82;
+    excursionDisplay = isTier1SuperEvent ? '$2,200 - $4,500' : '$1,200 - $2,400';
   } else if (inst.type === 'indices') {
     if (sym === 'NAS100') {
       directionalBias = 'STRONG_BULLISH';
-      impactBadge = 'TECH MULTIPLE EXPANSION';
+      impactBadge = isTier1SuperEvent ? 'TECH AGGRESSIVE EXPANSION' : 'TECH MULTIPLE EXPANSION';
       badgeColor = 'emerald';
-      confidenceScore = 86;
-      excursionDisplay = '140 - 220 points';
+      confidenceScore = isTier1SuperEvent ? 88 : 85;
+      excursionDisplay = isTier1SuperEvent ? '220 - 380 points' : '140 - 220 points';
     } else {
       directionalBias = 'BULLISH';
-      impactBadge = 'EQUITY BENCHMARK RALLY';
+      impactBadge = isTier1SuperEvent ? 'EQUITY BENCHMARK BREAKOUT' : 'EQUITY BENCHMARK RALLY';
       badgeColor = 'emerald';
-      confidenceScore = 84;
-      excursionDisplay = '40 - 75 points';
+      confidenceScore = isTier1SuperEvent ? 87 : 84;
+      excursionDisplay = isTier1SuperEvent ? '65 - 120 points' : '40 - 75 points';
     }
   } else if (currencyRole === 'BASE_CURRENCY') {
     // Pairs where USD is the BASE currency: USDJPY, USDCAD, USDCHF!
-    // When US data confirms cooling inflation or dovish Fed, USD WEAKENS!
-    // Therefore, USDJPY, USDCAD, and USDCHF move DOWN (BEARISH)!
     directionalBias = 'STRONG_BEARISH';
-    impactBadge = `${sym} BEARISH SQUEEZE`;
+    impactBadge = isTier1SuperEvent ? `${sym} BEARISH ${cat} FLUSH` : `${sym} BEARISH SQUEEZE`;
     badgeColor = 'rose';
-    confidenceScore = 85;
-    excursionDisplay = sym === 'USDJPY' ? '85 - 130 pips' : '55 - 75 pips';
+    confidenceScore = isTier1SuperEvent ? 89 : 85;
+    excursionDisplay = isTier1SuperEvent 
+      ? (sym === 'USDJPY' ? '110 - 180 pips' : '75 - 110 pips')
+      : (sym === 'USDJPY' ? '85 - 130 pips' : '55 - 75 pips');
   } else {
     // Pairs where USD is the QUOTE currency: EURUSD, GBPUSD, AUDUSD!
-    // When USD weakens, EURUSD, GBPUSD, AUDUSD move UP (BULLISH)!
     directionalBias = 'BULLISH';
-    impactBadge = `${sym} BULLISH IMPULSE`;
+    impactBadge = isTier1SuperEvent ? `${sym} ${cat} BULLISH BREAKOUT` : `${sym} BULLISH IMPULSE`;
     badgeColor = 'emerald';
-    confidenceScore = 83;
-    excursionDisplay = '45 - 65 pips';
+    confidenceScore = isTier1SuperEvent ? 88 : 83;
+    excursionDisplay = isTier1SuperEvent ? '65 - 105 pips' : '45 - 65 pips';
   }
 
   // 3. Formulate Pair-Specific Transmission Mechanics
   let transmissionMechanics = '';
   if (sym === 'XAUUSD') {
-    transmissionMechanics = `As US inflation moderates, US 10-year Treasury yields decline. Non-yielding Gold benefits from lower holding opportunity cost and a weakening US Dollar index (DXY), triggering aggressive institutional limit bids.`;
+    if (cat === 'NFP') {
+      transmissionMechanics = `Non-Farm Payrolls directly dictate the Federal Reserve's interest rate trajectory. Moderating employment additions combined with steady wage inflation keep rate-cut probabilities elevated, forcing 10-year Treasury yields lower and triggering institutional limit accumulation across spot Gold at ${pStr}.`;
+    } else if (cat === 'FOMC') {
+      transmissionMechanics = `FOMC rate decision and policy guidance determine the cost of holding non-yielding bullion. Neutral-to-dovish policy reaffirmation sparks immediate real yield contraction, driving capital into Gold toward overhead Value Area High (${vahStr}).`;
+    } else {
+      transmissionMechanics = `As US inflation moderates, US 10-year Treasury yields decline. Non-yielding Gold benefits from lower holding opportunity cost and a weakening US Dollar index (DXY), triggering aggressive institutional limit bids around ${pStr}.`;
+    }
   } else if (sym === 'USDJPY') {
-    transmissionMechanics = `USD is the Base Currency. Dollar softening combined with narrowing US-Japan sovereign yield differentials forces USDJPY long carry unwinds. Algorithmic sell programs trigger stop runs below key support.`;
+    transmissionMechanics = `USD is the Base Currency. Dollar softening combined with narrowing US-Japan sovereign yield differentials forces USDJPY long carry unwinds. Algorithmic sell programs trigger stop runs below key support toward VAL (${valStr}).`;
   } else if (sym === 'USDCAD') {
     transmissionMechanics = `USD is the Base Currency. Weakening Dollar and steady commodity consumer demand cause USDCAD to slide downward toward Value Area Low as the Canadian Dollar outperforms.`;
   } else if (sym === 'USDCHF') {
     transmissionMechanics = `USD is the Base Currency. Capital rotates out of the greenback and into the safe-haven Swiss Franc, dragging USDCHF lower into discount footprint blocks.`;
   } else if (sym === 'EURUSD') {
-    transmissionMechanics = `USD is the Quote Currency. A weaker Dollar naturally elevates EURUSD exchange rate, allowing European responsive buyers to reclaim Value Area boundaries and push toward fair value POC.`;
+    transmissionMechanics = `USD is the Quote Currency. A weaker Dollar naturally elevates EURUSD exchange rate, allowing European responsive buyers to reclaim Value Area boundaries and push toward fair value POC (${pocStr}).`;
   } else if (sym === 'GBPUSD') {
-    transmissionMechanics = `USD is the Quote Currency. Sterling capitalizes on Dollar deceleration, squeezing trapped retail shorts as price breaches overhead High Volume Nodes.`;
+    transmissionMechanics = `USD is the Quote Currency. Sterling capitalizes on Dollar deceleration, squeezing trapped retail shorts as price breaches overhead High Volume Nodes toward VAH (${vahStr}).`;
   } else if (sym === 'AUDUSD') {
     transmissionMechanics = `USD is the Quote Currency. Pro-growth consumer resilience and a softer US Dollar support risk-sensitive high-beta commodity currencies like the Australian Dollar.`;
   } else if (sym === 'NAS100') {
@@ -193,7 +200,7 @@ export function calculatePairSpecificImpact(
   } else if (sym === 'GER40') {
     transmissionMechanics = `European equities benefit from global liquidity easing, although Euro currency appreciation partially moderates export pricing power. Net auction bias remains accumulative.`;
   } else {
-    transmissionMechanics = `Macro liquidity relief from easing US monetary conditions triggers cross-asset institutional accumulation across ${sym}.`;
+    transmissionMechanics = `Macro liquidity relief from easing US monetary conditions triggers cross-asset institutional accumulation across ${sym} around ${pStr}.`;
   }
 
   // 4. Pair-Specific 2-Phase Sequence (Phase 1 Judas Trap vs Phase 2 True Direction)

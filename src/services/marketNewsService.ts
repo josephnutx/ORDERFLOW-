@@ -14,6 +14,7 @@ export interface MarketNewsStory {
   category: 'CENTRAL_BANKS' | 'INFLATION' | 'GEOPOLITICAL' | 'EMPLOYMENT' | 'EQUITIES_TECH' | 'COMMODITIES';
   relatedCurrencies: string[];
   takeaway: string;
+  isBreaking?: boolean;
   url?: string;
 }
 
@@ -179,14 +180,53 @@ export function getCuratedMarketStories(symbol: string, forceRefresh: boolean = 
   return relevantFirst;
 }
 
-// Fetch latest news from backend API or fallback to curated live stories
+function cleanNewsText(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/&#x2018;|&#x2019;|&#8216;|&#8217;/g, "'")
+    .replace(/&#x201c;|&#x201d;|&#8220;|&#8221;/g, '"')
+    .replace(/&#x2014;|&#8212;/g, '—')
+    .replace(/&#x2013;|&#8211;/g, '–')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#8364;/g, '€');
+}
+
+// Fetch latest real-time news from backend API stream
 export async function fetchLatestMarketNews(symbol: string): Promise<MarketNewsStory[]> {
   try {
     const res = await fetch(`/api/news/latest?symbol=${encodeURIComponent(symbol)}`);
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data.stories) && data.stories.length > 0) {
-        return data.stories;
+      const rawList = Array.isArray(data.stories) && data.stories.length > 0
+        ? data.stories
+        : (Array.isArray(data.articles) ? data.articles : []);
+
+      if (rawList.length > 0) {
+        return rawList.map((s: any, idx: number) => {
+          const headline = cleanNewsText(s.headline || s.title || '');
+          const summary = cleanNewsText(s.summary || headline);
+          const takeaway = cleanNewsText(s.takeaway || summary || headline);
+          const pubTime = s.timestamp || (s.published_at ? new Date(s.published_at).getTime() : Date.now() - idx * 600000);
+          return {
+            id: s.id || `live-news-${idx}`,
+            headline,
+            summary,
+            takeaway,
+            source: s.source || 'Financial Wire',
+            timestamp: pubTime,
+            timeFormatted: s.timeFormatted || new Date(pubTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            timeAgo: s.timeAgo || `${Math.max(1, Math.round((Date.now() - pubTime) / 60000))}m ago`,
+            impact: (s.impact || s.importance || 'MEDIUM').toUpperCase(),
+            sentiment: (s.sentiment || 'NEUTRAL').toUpperCase(),
+            category: s.category || 'CENTRAL_BANKS',
+            relatedCurrencies: s.relatedCurrencies || s.currencies || ['USD'],
+            url: s.url,
+          };
+        });
       }
     }
   } catch (err) {

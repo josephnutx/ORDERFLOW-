@@ -30,7 +30,7 @@ const INSTRUMENT_MAP: Record<string, InstrumentMapping> = {
     dukaInstrument: 'xauusd',
     digits: 2,
     tickSize: 0.1,
-    basePrice: 2742.50,
+    basePrice: 4070.50,
   },
   BTCUSD: {
     symbol: 'BTCUSD',
@@ -39,7 +39,7 @@ const INSTRUMENT_MAP: Record<string, InstrumentMapping> = {
     dukaInstrument: 'btcusd',
     digits: 2,
     tickSize: 1.0,
-    basePrice: 67450.0,
+    basePrice: 76136.0,
   },
 
   // Major Forex Pairs
@@ -50,7 +50,7 @@ const INSTRUMENT_MAP: Record<string, InstrumentMapping> = {
     dukaInstrument: 'eurusd',
     digits: 5,
     tickSize: 0.0001,
-    basePrice: 1.0845,
+    basePrice: 1.1177,
   },
   GBPUSD: {
     symbol: 'GBPUSD',
@@ -59,7 +59,7 @@ const INSTRUMENT_MAP: Record<string, InstrumentMapping> = {
     dukaInstrument: 'gbpusd',
     digits: 5,
     tickSize: 0.0001,
-    basePrice: 1.2985,
+    basePrice: 1.3400,
   },
   USDJPY: {
     symbol: 'USDJPY',
@@ -68,7 +68,7 @@ const INSTRUMENT_MAP: Record<string, InstrumentMapping> = {
     dukaInstrument: 'usdjpy',
     digits: 3,
     tickSize: 0.01,
-    basePrice: 152.65,
+    basePrice: 158.24,
   },
   AUDUSD: {
     symbol: 'AUDUSD',
@@ -77,7 +77,7 @@ const INSTRUMENT_MAP: Record<string, InstrumentMapping> = {
     dukaInstrument: 'audusd',
     digits: 5,
     tickSize: 0.0001,
-    basePrice: 0.6580,
+    basePrice: 0.6874,
   },
   USDCAD: {
     symbol: 'USDCAD',
@@ -86,7 +86,7 @@ const INSTRUMENT_MAP: Record<string, InstrumentMapping> = {
     dukaInstrument: 'usdcad',
     digits: 5,
     tickSize: 0.0001,
-    basePrice: 1.3860,
+    basePrice: 1.4060,
   },
   USDCHF: {
     symbol: 'USDCHF',
@@ -95,7 +95,7 @@ const INSTRUMENT_MAP: Record<string, InstrumentMapping> = {
     dukaInstrument: 'usdchf',
     digits: 5,
     tickSize: 0.0001,
-    basePrice: 0.8655,
+    basePrice: 0.8180,
   },
 
   // Global Indices
@@ -106,7 +106,7 @@ const INSTRUMENT_MAP: Record<string, InstrumentMapping> = {
     dukaInstrument: 'usatechidxusd',
     digits: 2,
     tickSize: 0.5,
-    basePrice: 20485.50,
+    basePrice: 27052.50,
   },
   US500: {
     symbol: 'US500',
@@ -115,7 +115,7 @@ const INSTRUMENT_MAP: Record<string, InstrumentMapping> = {
     dukaInstrument: 'usa500idxusd',
     digits: 2,
     tickSize: 0.25,
-    basePrice: 5865.25,
+    basePrice: 7380.50,
   },
   US30: {
     symbol: 'US30',
@@ -124,7 +124,7 @@ const INSTRUMENT_MAP: Record<string, InstrumentMapping> = {
     dukaInstrument: 'usa30idxusd',
     digits: 1,
     tickSize: 1.0,
-    basePrice: 42920.0,
+    basePrice: 51062.0,
   },
   GER40: {
     symbol: 'GER40',
@@ -133,7 +133,7 @@ const INSTRUMENT_MAP: Record<string, InstrumentMapping> = {
     dukaInstrument: 'deuidxeur',
     digits: 1,
     tickSize: 0.5,
-    basePrice: 19480.0,
+    basePrice: 21450.0,
   },
   UK100: {
     symbol: 'UK100',
@@ -142,7 +142,7 @@ const INSTRUMENT_MAP: Record<string, InstrumentMapping> = {
     dukaInstrument: 'gbridxgbp',
     digits: 1,
     tickSize: 0.5,
-    basePrice: 8245.0,
+    basePrice: 8720.0,
   },
 };
 
@@ -352,6 +352,7 @@ function ensureTradingViewSession(symbol: string, timeframe = 'M5') {
       const latest = periods[0];
       const digits = map.digits;
       const currentPrice = Number(latest.close.toFixed(digits));
+      map.basePrice = currentPrice;
 
       // Map periods to chronological candles
       const candles: TVCandle[] = [];
@@ -504,7 +505,14 @@ function seedInitialDukascopyTicks(symbol: string, centerPrice: number, tickSize
     dukascopyCache[symbol] = { ticks: [], lastFetched: 0, isFetching: false };
   }
   const cached = dukascopyCache[symbol];
-  if (cached.ticks.length > 0) return;
+  if (cached.ticks.length > 0) {
+    const samplePrice = cached.ticks[0]?.askPrice || 0;
+    if (samplePrice > 0 && Math.abs(samplePrice - centerPrice) / centerPrice > 0.15) {
+      cached.ticks = [];
+    } else {
+      return;
+    }
+  }
 
   const now = Date.now();
   const ticks: DukascopyTick[] = [];
@@ -533,9 +541,89 @@ function seedInitialDukascopyTicks(symbol: string, centerPrice: number, tickSize
 }
 
 // -------------------------------------------------------------
+// Real-World Market Schedule Checker for Server Tick Engine
+// Enforces exchange closing rules:
+// - Crypto (BTCUSD, etc.) is open 24/7/365.
+// - Interbank Forex closes Friday 17:00 ET to Sunday 17:00 ET.
+// - CME Metals (Gold / XAUUSD) and Index Futures close Friday 17:00 ET to Sunday 18:00 ET.
+// - Mon-Thu daily rollover/maintenance breaks (17:00 - 18:00 ET).
+// -------------------------------------------------------------
+export function isMarketOpenForSymbol(symbol: string, referenceDate: Date = new Date()): boolean {
+  const sym = (symbol || '').toUpperCase();
+  // Crypto runs 24/7
+  if (sym.includes('BTC') || sym.includes('ETH') || sym.includes('SOL') || sym.includes('XRP') || sym.includes('CRYPTO')) {
+    return true;
+  }
+
+  // Get New York wall-clock time
+  let day = referenceDate.getUTCDay(); // 0 = Sun, 6 = Sat
+  let hour = referenceDate.getUTCHours();
+  let minute = referenceDate.getUTCMinutes();
+
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      weekday: 'short',
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(referenceDate);
+    const weekdayStr = parts.find((p) => p.type === 'weekday')?.value || 'Mon';
+    hour = parseInt(parts.find((p) => p.type === 'hour')?.value || '0', 10);
+    minute = parseInt(parts.find((p) => p.type === 'minute')?.value || '0', 10);
+    const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    day = dayMap[weekdayStr] ?? day;
+  } catch {
+    // Winter EST fallback (UTC-5)
+    hour = (referenceDate.getUTCHours() - 5 + 24) % 24;
+    day = referenceDate.getUTCHours() < 5 ? (referenceDate.getUTCDay() - 1 + 7) % 7 : referenceDate.getUTCDay();
+  }
+
+  const timeInMinutes = hour * 60 + minute;
+
+  // Friday after 5:00 PM ET (17:00 ET) -> Closed for the weekend
+  if (day === 5 && timeInMinutes >= 17 * 60) {
+    return false;
+  }
+
+  // Entire Saturday (all day) -> Closed
+  if (day === 6) {
+    return false;
+  }
+
+  // Sunday pre-open: Forex opens 17:00 ET, Metals & CME Futures open 18:00 ET
+  const isForex = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF'].includes(sym);
+  const openTimeMin = isForex ? 17 * 60 : 18 * 60;
+  if (day === 0 && timeInMinutes < openTimeMin) {
+    return false;
+  }
+
+  // Monday through Thursday daily rollover/settlement breaks (5:00 PM - 6:00 PM ET or 5:00 - 5:15 PM ET)
+  if (day >= 1 && day <= 4) {
+    if (isForex && timeInMinutes >= 17 * 60 && timeInMinutes < 17 * 60 + 15) {
+      return false;
+    }
+    if (!isForex && timeInMinutes >= 17 * 60 && timeInMinutes < 18 * 60) {
+      return false;
+    }
+  }
+
+  // European cash bourse hours (GER40, UK100)
+  if (sym === 'GER40' || sym === 'UK100') {
+    const utcHour = referenceDate.getUTCHours();
+    if (utcHour < 7 || utcHour >= 20) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// -------------------------------------------------------------
 // Live Real-Time Market Heartbeat & Micro-Tick Streaming Engine
 // Keeps the order book, chart wicks, delta, and footprint breathing
-// even when external WebSocket connections idle or pause.
+// for open markets. Strictly freezes prices for markets closed on weekends!
 // -------------------------------------------------------------
 function startLiveTickHeartbeat() {
   setInterval(() => {
@@ -546,10 +634,37 @@ function startLiveTickHeartbeat() {
       const state = tvState[sessionKey];
       if (!state || state.candles.length === 0) return;
 
+      const [sym, tf] = sessionKey.split('_');
+      const isOpen = isMarketOpenForSymbol(sym);
+
+      // If the market is closed (e.g. weekend for Gold/Forex/Indices), freeze price completely!
+      // Do NOT modify candle close/high/low/volume or broadcast synthetic price updates.
+      if (!isOpen) {
+        // Send stationary keep-alive heartbeat if listeners exist so connection doesn't drop
+        if (state.listeners.size > 0 && now - state.lastUpdate > 12000) {
+          state.lastUpdate = now;
+          const payload = JSON.stringify({
+            type: 'heartbeat',
+            symbol: sym,
+            timeframe: tf || state.timeframe,
+            price: state.currentPrice,
+            marketStatus: 'CLOSED_WEEKEND',
+            timestamp: now,
+          });
+          state.listeners.forEach((res) => {
+            try {
+              res.write(`data: ${payload}\n\n`);
+            } catch {
+              state.listeners.delete(res);
+            }
+          });
+        }
+        return;
+      }
+
       // If last real WebSocket update occurred < 1600ms ago, let external ticks drive it
       if (now - state.lastUpdate < 1600) return;
 
-      const [sym, tf] = sessionKey.split('_');
       const map = INSTRUMENT_MAP[sym] || INSTRUMENT_MAP.XAUUSD;
       const digits = map.digits;
       const tick = map.tickSize;
@@ -691,12 +806,16 @@ async function startServer() {
       lastUpdate: Date.now(),
     };
 
+    const isOpen = isMarketOpenForSymbol(symbol);
+
     res.json({
       symbol,
       timeframe: state.timeframe || timeframe,
       instrument: map,
       livePrice: state.currentPrice,
-      status: state.status,
+      isOpen,
+      marketStatus: isOpen ? 'OPEN' : 'CLOSED_WEEKEND',
+      status: isOpen ? state.status : 'market_closed_weekend',
       lastUpdate: state.lastUpdate,
       candles: state.candles,
       source: 'TradingView-API WebSocket Real-Time',
@@ -720,13 +839,15 @@ async function startServer() {
     if (state) {
       state.listeners.add(res);
 
-      // Initial snapshot
+      // Initial snapshot with full historical candles and latest candle for instant live sync
       const initial = JSON.stringify({
         type: 'initial_snapshot',
         symbol,
         timeframe,
         price: state.currentPrice,
         candlesCount: state.candles.length,
+        candles: state.candles,
+        latestCandle: state.candles[state.candles.length - 1],
         timestamp: Date.now(),
       });
       res.write(`data: ${initial}\n\n`);
