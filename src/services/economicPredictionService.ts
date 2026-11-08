@@ -154,6 +154,7 @@ export interface RawCalendarEvent {
   isPast?: boolean;
   isUpcoming?: boolean;
   status?: string;
+  freshness?: string;
 }
 
 export interface ReleasedEventRecord {
@@ -572,10 +573,22 @@ export function generateCuratedPredictions(
   // 1. Process True Live Upcoming Events from Pipeline
   if (Array.isArray(liveCalendarEvents) && liveCalendarEvents.length > 0) {
     const rawUpcoming = liveCalendarEvents.filter((e) => {
+      // Must not be past, released, or already printed with an actual figure
+      if (e.isPast === true || e.status === 'released' || e.freshness === 'RELEASED') {
+        return false;
+      }
+      if (e.actual != null && String(e.actual).trim() !== '') {
+        return false;
+      }
+
       const rawTime = e.eventTime || (e.scheduled_at ? new Date(e.scheduled_at).getTime() : 0);
       const mins = e.timeUntilMinutes ?? (rawTime > 0 ? Math.round((rawTime - now) / oneMin) : -1);
-      // Keep releases dropping now or upcoming
-      return mins >= -5 || (rawTime > now - 5 * oneMin) || e.isUpcoming;
+
+      // Must be in the future (mins >= 0) and scheduled in future
+      if (mins < 0) return false;
+      if (rawTime > 0 && rawTime < now) return false;
+
+      return true;
     });
 
     for (const e of rawUpcoming) {
@@ -597,7 +610,7 @@ export function generateCuratedPredictions(
 
       const curr = (e.currency || e.country || 'USD').toUpperCase();
       const rawTime = e.eventTime || (e.scheduled_at ? new Date(e.scheduled_at).getTime() : now + 60 * oneMin);
-      const mins = e.timeUntilMinutes ?? Math.round((rawTime - now) / oneMin);
+      const mins = Math.max(0, e.timeUntilMinutes ?? Math.round((rawTime - now) / oneMin));
 
       const classified = classifyMacroEvent(title, curr);
 
@@ -614,7 +627,7 @@ export function generateCuratedPredictions(
       const pairImpact = calculatePairSpecificImpact(currentSymbol, curr, classified.category, modelOutput, digits);
 
       const localTime = formatToLocalTime(rawTime);
-      const isImminent = mins <= 120 && mins >= -5;
+      const isImminent = mins <= 120;
 
       // Realistic whisper value calculation based on forecast
       let whisperStr = `${fcStr} (Whisper leaning slightly cooler)`;
@@ -683,129 +696,33 @@ export function generateCuratedPredictions(
     }
   }
 
-  // 2. Safety Fallback: If feed had fewer than 3 events, append core macro anchors
-  if (results.length < 3) {
-    const fallbackAnchors = [
-      {
-        cat: 'NFP' as MacroReleaseType,
-        title: 'US Non-Farm Payrolls (NFP & Unemployment Rate)',
-        mins: 70,
-        fc: '+65K / 4.2% Rate',
-        prev: '+29K / 4.2% Rate',
-      },
-      {
-        cat: 'FOMC' as MacroReleaseType,
-        title: 'Federal Reserve FOMC Interest Rate Decision & Policy Statement',
-        mins: 210,
-        fc: '4.50% Target',
-        prev: '4.75% Target',
-      },
-      {
-        cat: 'CPI' as MacroReleaseType,
-        title: 'US Consumer Price Index (CPI YoY & Final Core)',
-        mins: 1440,
-        fc: '+3.1% YoY (Core: +3.2%)',
-        prev: '+3.2% YoY (Core: +3.3%)',
-      },
-    ];
-
-    for (const fb of fallbackAnchors) {
-      if (results.some((r) => r.category === fb.cat)) continue;
-      const fbTime = now + fb.mins * oneMin;
-      const fbPairImpact = calculatePairSpecificImpact(currentSymbol, 'USD', fb.cat, modelOutput, digits);
-      const fbLocal = formatToLocalTime(fbTime);
-
-      results.push({
-        id: `pred-fallback-${fb.cat.toLowerCase()}`,
-        category: fb.cat,
-        title: fb.title,
-        currency: 'USD',
-        impact: 'CRITICAL',
-        status: fb.mins <= 120 ? 'UPCOMING_IMMINENT' : 'UPCOMING',
-        eventTime: fbTime,
-        timeUntilMinutes: fb.mins,
-        countdownFormatted: formatLiveCountdown(fb.mins),
-        timeFormatted: `${fbLocal.dateStr} · ${fbLocal.timeStr} ${dst.tzAbbreviation}`,
-        dateFormatted: fbLocal.dateStr,
-        badgeLabel: fb.mins <= 120 ? '🔥 NEXT IMMINENT RELEASE' : 'TIER-1 MACRO ANCHOR',
-        affectedInstruments: [sym, 'DXY', 'EURUSD', 'US500', 'XAUUSD', 'USDJPY', 'BTCUSD'],
-        isVerifiedFromLiveFeed: false,
-        pairSpecificImpact: fbPairImpact,
-        newsPrediction: {
-          headlineForecast: `Consensus expects ${fb.title} at ${fb.fc} (Prior: ${fb.prev}).`,
-          consensusValue: fb.fc,
-          previousValue: fb.prev,
-          whisperNumber: `${fb.fc} (Whisper leaning dovish)`,
-          bankConsensusRange: `Consensus median: ${fb.fc}`,
-        },
-        whyPrediction: {
-          primaryDrivers: [
-            'Macroeconomic Normalization: Disinflation progress allowing policy flexibility.',
-            'Labor Balance: Moderating net hiring maintaining steady wage equilibrium.',
-          ],
-          leadingIndicatorSignals: 'Leading indicators confirm steady economic expansion.',
-        },
-        modelMarketObservations: {
-          orderFlowState: `Balanced liquidity depth across ${sym}.`,
-          restingLiquidity: `Order book concentrated at POC (${pocStr}).`,
-          cvdDeltaState: `Cumulative Delta +${deltaVal} contracts.`,
-          valueAreaPositioning: `Within fair value range on ${sym}.`,
-        },
-        assessmentWithNews: {
-          pricingStatus: 'PARTIALLY_PRICED_IN',
-          pricingExplanation: 'Standard consensus reflects baseline soft-landing expectation.',
-          trapWarning: `Watch for Phase 1 algorithmic fakeouts around ${sym} boundaries.`,
-          scenarioMatrix: fbPairImpact.scenarioMatrix,
-        },
-        finalPrediction: {
-          verdictCall: `FINAL PREDICTION: ${fbPairImpact.impactBadge} (${fbPairImpact.expectedExcursionDisplay})`,
-          directionalBias: fbPairImpact.directionalBias,
-          confidenceScore: fbPairImpact.confidenceScore,
-          expectedPriceAction: fbPairImpact.transmissionMechanics,
-        },
-        twoPhaseMovePrediction: {
-          phase1KneeJerk: fbPairImpact.phase1KneeJerk,
-          phase2TrueMacroMove: fbPairImpact.phase2TrueMacroMove,
-          theRightActualMovePlaybook: fbPairImpact.rightActualMovePlaybook,
-        },
-      });
-    }
-  }
-
   // Sort strictly in chronological order by timeUntilMinutes ascending
+  // Notice: If there are no upcoming catalysts in the pipeline, results remains []
+  // We do NOT inject synthetic fallback anchors so the trader always sees the true calendar state.
   return results.sort((a, b) => a.timeUntilMinutes - b.timeUntilMinutes);
 }
 
 /**
  * Extracts true recently released events from the live calendar feed for verification
- * Always includes verified PPI print with actual +0.2% MoM and real released events
+ * Only includes genuinely released events that occurred in the past or have printed an actual value
  */
 export function getRecentlyReleasedEvents(liveCalendarEvents: RawCalendarEvent[] = []): ReleasedEventRecord[] {
   const now = Date.now();
   const oneMin = 60 * 1000;
   const dst = getDstInfo(new Date(now));
 
-  const verifiedPpiRelease: ReleasedEventRecord = {
-    id: 'rel-ppi-verified-live',
-    title: 'US Producer Price Index (PPI MoM & Core Final Demand)',
-    currency: 'USD',
-    dateFormatted: 'Recent Session',
-    timeFormatted: `08:30 AM ${dst.tzAbbreviation}`,
-    actual: '+0.2% MoM (Core: +0.2%)',
-    forecast: '+0.6% MoM (Core: 0.3%)',
-    previous: '+0.4% MoM (Core: 0.2%)',
-    impact: 'HIGH',
-    minutesAgo: 45,
-    eventTime: now - 45 * oneMin,
-    postReleaseAnalysis: 'Cooler Surprise (+0.2% vs 0.6% forecast). Executed initial -18p bearish knee-jerk stop-hunt, followed by +72p institutional bullish expansion.',
-  };
-
   const seenTitles = new Set<string>();
   const parsed: ReleasedEventRecord[] = [];
 
   for (const e of liveCalendarEvents || []) {
     const rawTime = e.eventTime || (e.scheduled_at ? new Date(e.scheduled_at).getTime() : 0);
-    const isPast = e.isPast || e.status === 'released' || (rawTime > 0 && rawTime < now) || e.actual != null;
+    const isPast =
+      e.isPast === true ||
+      e.status === 'released' ||
+      e.freshness === 'RELEASED' ||
+      (rawTime > 0 && rawTime < now) ||
+      (e.actual != null && String(e.actual).trim() !== '');
+
     if (!isPast) continue;
 
     const title = (e.eventTitle || e.event || '').trim();
@@ -818,9 +735,7 @@ export function getRecentlyReleasedEvents(liveCalendarEvents: RawCalendarEvent[]
       tLower.includes('pakistan') ||
       tLower.includes('costa rica') ||
       tLower.includes('angola') ||
-      tLower.includes('malta') ||
-      tLower.includes('producer price') ||
-      tLower.includes('ppi')
+      tLower.includes('malta')
     ) {
       continue;
     }
@@ -837,6 +752,12 @@ export function getRecentlyReleasedEvents(liveCalendarEvents: RawCalendarEvent[]
     let postAnalysis = `Printed: ${actStr} (Forecast: ${fcStr}). Order book absorbed initial volatility with institutional volume execution.`;
     if (tLower.includes('pce')) {
       postAnalysis = `Core PCE printed ${actStr} vs ${fcStr} forecast. Core inflation holding firm; triggered initial dollar bid before yield curve absorption.`;
+    } else if (tLower.includes('cpi')) {
+      postAnalysis = `CPI printed ${actStr} vs ${fcStr} consensus. Initial stop-hunt cleared liquidity before macro trend resumed.`;
+    } else if (tLower.includes('payrolls') || tLower.includes('nfp')) {
+      postAnalysis = `Labor print ${actStr} vs ${fcStr} expected. High-frequency algorithms triggered 2-phase repricing.`;
+    } else if (tLower.includes('ppi')) {
+      postAnalysis = `PPI printed ${actStr} vs ${fcStr} forecast. Wholesale price pressures absorbed with baseline positioning.`;
     }
 
     parsed.push({
@@ -854,8 +775,8 @@ export function getRecentlyReleasedEvents(liveCalendarEvents: RawCalendarEvent[]
       postReleaseAnalysis: postAnalysis,
     });
 
-    if (parsed.length >= 8) break;
+    if (parsed.length >= 10) break;
   }
 
-  return [verifiedPpiRelease, ...parsed].sort((a, b) => a.minutesAgo - b.minutesAgo);
+  return parsed.sort((a, b) => a.minutesAgo - b.minutesAgo);
 }

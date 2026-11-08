@@ -531,23 +531,22 @@ export function generateFootprintBubbles(candles: Candle[], digits: number = 2):
   }
   selectedIndices.sort((a, b) => a - b);
 
-  selectedIndices.forEach((idx, rank) => {
+  selectedIndices.forEach((idx) => {
     const candle = candles[idx];
-    const nextCandle = candles[idx + 1] || candle;
     const isBullCandle = candle.close >= candle.open;
-    const nextMovesUp = nextCandle.close >= candle.close;
     const bodyTop = Math.max(candle.open, candle.close);
     const bodyBottom = Math.min(candle.open, candle.close);
+    const body = Math.abs(candle.close - candle.open);
     const bodyMid = (bodyTop + bodyBottom) / 2;
-    const upperWickMid = bodyTop + Math.max((candle.high - bodyTop) * 0.65, (candle.high - candle.low) * 0.18);
-    const lowerWickMid = bodyBottom - Math.max((bodyBottom - candle.low) * 0.65, (candle.high - candle.low) * 0.18);
+    const upperWick = candle.high - bodyTop;
+    const lowerWick = bodyBottom - candle.low;
+    const upperWickMid = bodyTop + Math.max(upperWick * 0.65, (candle.high - candle.low) * 0.18);
+    const lowerWickMid = bodyBottom - Math.max(lowerWick * 0.65, (candle.high - candle.low) * 0.18);
 
-    // Big institutional contract block (580 to 1,240 contracts)
-    const contracts = Math.floor(620 + ((idx * 137 + rank * 193) % 580));
+    // Immutable institutional contract block tied deterministically to candle timestamp and volume (Zero Repainting)
+    const timeSeed = Math.floor(candle.timestamp / 1000) % 1000;
+    const contracts = Math.floor(620 + ((timeSeed * 37 + Math.round(candle.volume * 23)) % 580));
 
-    // Balanced pattern assignment ensuring both Green (Buy / Bid Absorption) and Red (Sell / Ask Absorption)
-    // Alternate between wick absorption, body acceptance, and contrarian reversal
-    const patternSlot = rank % 4;
     let side: 'buy' | 'sell';
     let price: number;
     let patternType: FootprintBubble['patternType'];
@@ -557,84 +556,47 @@ export function generateFootprintBubbles(candles: Candle[], digits: number = 2):
     let isAbsorption = false;
     let isStacked = false;
 
-    if (!isBullCandle) {
-      // Patterns on Bearish Candles
-      if (patternSlot === 0) {
-        // 1. Bearish Candle — Continuation Absorption: Passive sell wall absorbs rally bounce at upper wick -> continuation down (RED)
-        side = 'sell';
-        price = Number(Math.min(candle.high, upperWickMid).toFixed(digits));
-        patternType = 'ABSORPTION_CONTINUATION';
-        patternLabel = 'Absorption (Continuation)';
-        patternPlacement = 'UPPER_WICK';
-        patternExplanation = `Bearish Candle · Absorption (Continuation): ${contracts} aggressive BUY contracts into the upper wick were passively absorbed by institutional sell limits, driving continuation lower.`;
-        isAbsorption = true;
-      } else if (patternSlot === 1) {
-        // 2. Bearish Candle — Acceptance: Sell volume inside the candle body driving value acceptance lower (RED)
-        side = 'sell';
-        price = Number(bodyMid.toFixed(digits));
-        patternType = 'ACCEPTANCE';
-        patternLabel = 'Acceptance (Bearish Body)';
-        patternPlacement = 'BODY';
-        patternExplanation = `Bearish Candle · Acceptance: ${contracts} heavy SELL contracts executed inside the body, confirming institutional value acceptance lower.`;
-        isStacked = true;
-      } else if (patternSlot === 2 || nextMovesUp) {
-        // 3. Bearish Candle — BUY ABSORPTION: Passive buy wall on lower wick absorbs aggressive sellers -> GREEN BUBBLE!
-        side = 'buy';
-        price = Number(Math.max(candle.low, lowerWickMid).toFixed(digits));
-        patternType = 'ABSORPTION_CONTRARIAN';
-        patternLabel = 'BUY ABSORPTION';
-        patternPlacement = 'LOWER_WICK';
-        patternExplanation = `Bearish Candle · BUY ABSORPTION: ${contracts} aggressive SELL contracts at the lower wick were completely absorbed by resting institutional BUY limits, triggering a bullish Value Area reclaim.`;
-        isAbsorption = true;
-      } else {
-        // 4. Bearish Candle — Bullish Wick Rejection: Responsive buyers sweep low (GREEN)
-        side = 'buy';
-        price = Number(Math.max(candle.low, lowerWickMid).toFixed(digits));
-        patternType = 'REJECTION';
-        patternLabel = 'Rejection (Bullish Wick)';
-        patternPlacement = 'LOWER_WICK';
-        patternExplanation = `Bearish Candle · Rejection: ${contracts} responsive BUY contracts fired at the lower wick extreme, rejecting lower prices and initiating a bullish rotation.`;
-        isAbsorption = true;
-      }
+    // Strict Deterministic Order-Flow Classification (Derived exclusively from the candle's own completed structure)
+    // NEVER depends on dynamic array rank or future candles:
+    const hasProminentUpperWick = upperWick > lowerWick * 1.25 && upperWick >= body * 0.25;
+    const hasProminentLowerWick = lowerWick > upperWick * 1.25 && lowerWick >= body * 0.25;
+
+    if (hasProminentLowerWick) {
+      // Lower Wick Defense: Institutional buy limits absorb selling pressure at the lows (GREEN BUBBLE - Permanent)
+      side = 'buy';
+      price = Number(Math.max(candle.low, lowerWickMid).toFixed(digits));
+      patternType = 'ABSORPTION_CONTRARIAN';
+      patternLabel = 'BUY ABSORPTION';
+      patternPlacement = 'LOWER_WICK';
+      patternExplanation = `BUY ABSORPTION: ${contracts} aggressive sell contracts at the lower wick were absorbed by institutional BUY limits, rejecting lower prices.`;
+      isAbsorption = true;
+    } else if (hasProminentUpperWick) {
+      // Upper Wick Rejection: Institutional sell wall absorbs buying spike at the highs (RED BUBBLE - Permanent)
+      side = 'sell';
+      price = Number(Math.min(candle.high, upperWickMid).toFixed(digits));
+      patternType = 'ABSORPTION_CONTRARIAN';
+      patternLabel = 'SELL ABSORPTION';
+      patternPlacement = 'UPPER_WICK';
+      patternExplanation = `SELL ABSORPTION: ${contracts} aggressive buy contracts at the upper wick hit an institutional SELL wall and were absorbed, rejecting higher prices.`;
+      isAbsorption = true;
+    } else if (isBullCandle) {
+      // Bullish Body Acceptance: Buyers driving through the candle body (GREEN BUBBLE - Permanent)
+      side = 'buy';
+      price = Number(bodyMid.toFixed(digits));
+      patternType = 'ACCEPTANCE';
+      patternLabel = 'Acceptance (Bullish Body)';
+      patternPlacement = 'BODY';
+      patternExplanation = `Bullish Acceptance: ${contracts} buy contracts executed inside the bullish body, confirming buyer control through the node.`;
+      isStacked = true;
     } else {
-      // Patterns on Bullish Candles
-      if (patternSlot === 0) {
-        // 1. Bullish Candle — Continuation Absorption: Institutional bids absorb dip at lower wick -> continuation up (GREEN BUBBLE!)
-        side = 'buy';
-        price = Number(Math.max(candle.low, lowerWickMid).toFixed(digits));
-        patternType = 'ABSORPTION_CONTINUATION';
-        patternLabel = 'Absorption (Continuation)';
-        patternPlacement = 'LOWER_WICK';
-        patternExplanation = `Bullish Candle · Absorption (Continuation): ${contracts} aggressive SELL contracts on the dip were absorbed by institutional bids, fueling bullish continuation higher.`;
-        isAbsorption = true;
-      } else if (patternSlot === 1) {
-        // 2. Bullish Candle — Acceptance: Buy volume inside candle body driving value acceptance higher (GREEN BUBBLE!)
-        side = 'buy';
-        price = Number(bodyMid.toFixed(digits));
-        patternType = 'ACCEPTANCE';
-        patternLabel = 'Acceptance (Bullish Body)';
-        patternPlacement = 'BODY';
-        patternExplanation = `Bullish Candle · Acceptance: ${contracts} heavy BUY contracts executed inside the bullish body, confirming institutional value acceptance higher.`;
-        isStacked = true;
-      } else if (patternSlot === 2 || !nextMovesUp) {
-        // 3. Bullish Candle — SELL ABSORPTION: Passive sell wall on upper wick absorbs aggressive buyers -> RED BUBBLE!
-        side = 'sell';
-        price = Number(Math.min(candle.high, upperWickMid).toFixed(digits));
-        patternType = 'ABSORPTION_CONTRARIAN';
-        patternLabel = 'SELL ABSORPTION';
-        patternPlacement = 'UPPER_WICK';
-        patternExplanation = `Bullish Candle · SELL ABSORPTION: ${contracts} aggressive BUY contracts on the upper wick hit an institutional SELL wall and were absorbed, turning price back inside Value Area.`;
-        isAbsorption = true;
-      } else {
-        // 4. Bullish Candle — Bearish Wick Rejection: Responsive sellers slam high (RED)
-        side = 'sell';
-        price = Number(Math.min(candle.high, upperWickMid).toFixed(digits));
-        patternType = 'REJECTION';
-        patternLabel = 'Rejection (Bearish Wick)';
-        patternPlacement = 'UPPER_WICK';
-        patternExplanation = `Bullish Candle · Rejection: ${contracts} aggressive SELL contracts slammed the upper wick high, rejecting higher prices and forcing a bearish rotation.`;
-        isAbsorption = true;
-      }
+      // Bearish Body Acceptance: Sellers driving through the candle body (RED BUBBLE - Permanent)
+      side = 'sell';
+      price = Number(bodyMid.toFixed(digits));
+      patternType = 'ACCEPTANCE';
+      patternLabel = 'Acceptance (Bearish Body)';
+      patternPlacement = 'BODY';
+      patternExplanation = `Bearish Acceptance: ${contracts} sell contracts executed inside the bearish body, confirming seller control through the node.`;
+      isStacked = true;
     }
 
     bubbles.push({
@@ -2039,11 +2001,22 @@ export function scanAllSniperOpportunities(timeframe: string = 'M5'): SniperOppo
 }
 
 
+export interface PulledSpoofEvent {
+  price: number;
+  startCandleIndex: number;
+  endCandleIndex: number;
+  pulledAtTimeStr?: string;
+  volumePulled: number;
+  side: 'ask' | 'bid';
+  label: string;
+}
+
 export interface HeatmapMatrixResult {
   columns: HeatmapTimeColumn[];
   priceLevels: number[];
   pools: LiquidityPoolNode[];
   sweepZones: LiquiditySweepZone[];
+  pulledSpoofEvents?: PulledSpoofEvent[];
   minPrice: number;
   maxPrice: number;
   priceStep: number;
@@ -2052,7 +2025,8 @@ export interface HeatmapMatrixResult {
 export function generateHeatmapMatrix(
   candles: Candle[],
   cfgOrSymbol: InstrumentConfig | string,
-  rowCount: number = 72
+  rowCount: number = 72,
+  spoofProbability: number = 0
 ): HeatmapMatrixResult {
   const cfg = typeof cfgOrSymbol === 'string' ? (INSTRUMENTS[cfgOrSymbol] || INSTRUMENTS.XAUUSD) : cfgOrSymbol;
   const digits = cfg.digits;
@@ -2097,7 +2071,25 @@ export function generateHeatmapMatrix(
   const consolMin = Math.min(...consolCandles.map((c) => c.low));
   const consolMax = Math.max(...consolCandles.map((c) => c.high));
 
-  // Key persistent resting walls
+  // Ghost Pulled Spoof Wall: Strictly ONLY generated when model flags active elevated spoofing (>= 50%)
+  const isElevatedSpoof = spoofProbability >= 0.50;
+  const spoofStartIdx = Math.max(2, Math.floor(candleCount * 0.12));
+  const spoofEndIdx = Math.min(candleCount - 10, Math.floor(candleCount * 0.35));
+  const spoofPrice = Number((consolMax + (maxPrice - consolMax) * 0.32).toFixed(digits));
+
+  const pulledSpoofEvents: PulledSpoofEvent[] = isElevatedSpoof ? [
+    {
+      price: spoofPrice,
+      startCandleIndex: spoofStartIdx,
+      endCandleIndex: spoofEndIdx,
+      pulledAtTimeStr: candles[spoofEndIdx]?.timeStr,
+      volumePulled: 1850,
+      side: 'ask',
+      label: 'PULLED PHANTOM SPOOF (Orders Canceled On Approach — 0 Lots Filled)',
+    },
+  ] : [];
+
+  // Key persistent resting walls + the pulled spoof wall (only present when spoofing is active)
   const wallLevels = [
     { price: highCandle.high, startIdx: 0, endIdx: candleCount - 1, baseIntensity: 0.95, side: 'ask' as const, label: 'Macro Swing High Liquidity Wall' },
     { price: consolMax, startIdx: Math.max(0, consolStartIdx - 6), endIdx: candleCount - 1, baseIntensity: 0.88, side: 'ask' as const, label: 'Consolidation Ceiling Resistance' },
@@ -2106,6 +2098,7 @@ export function generateHeatmapMatrix(
     { price: (consolMin + consolMax) / 2, startIdx: consolStartIdx, endIdx: consolEndIdx + 6, baseIntensity: 0.75, side: 'bid' as const, label: 'Mid-Range Fair Value Node' },
     { price: maxPrice - margin * 0.4, startIdx: 0, endIdx: candleCount - 1, baseIntensity: 0.82, side: 'ask' as const, label: 'Overhead Institutional Resting Asks' },
     { price: minPrice + margin * 0.4, startIdx: 0, endIdx: candleCount - 1, baseIntensity: 0.85, side: 'bid' as const, label: 'Underlying Institutional Resting Bids' },
+    ...(isElevatedSpoof ? [{ price: spoofPrice, startIdx: spoofStartIdx, endIdx: spoofEndIdx, baseIntensity: 0.91, side: 'ask' as const, label: 'Phantom Spoof Wall (Vanished Before Fill)' }] : []),
   ];
 
   // 3. Build time columns with discrete heatmap cells
@@ -2235,6 +2228,7 @@ export function generateHeatmapMatrix(
     priceLevels,
     pools,
     sweepZones,
+    pulledSpoofEvents,
     minPrice,
     maxPrice,
     priceStep,

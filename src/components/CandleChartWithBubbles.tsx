@@ -1565,12 +1565,12 @@ export const CandleChartWithBubbles: React.FC<CandleChartProps> = ({
                         Setup: Sweep & Turn at {(edge.liquiditySweepAudit?.sweptLiquidityPrice ?? edge.edgePrice).toFixed(digits)} · Target: {edge.targetTP2.toFixed(digits)}
                       </text>
                     )}
-                    {/* Real-Time Wick Formation Entry Indication on the Candlestick Chart (Hidden when removed until next signal) */}
+                    {/* Real-Time Wick Formation Entry Indication on the Candlestick Chart (Directly at price, zero overlap) */}
                     {showWickIndication && !isWickSignalRemoved && (() => {
                       const scalpPrice = scalp?.entryZone.triggerPrice ?? edge.optimalEntry;
                       const isBuySetup = isBuy;
 
-                      // Directly anchor to the live forming candle at the right (NOT historical candle to the side!)
+                      // Directly anchor to the live forming candle at the right
                       const formingIdx = displayCandles.length - 1;
                       const formingCandle = displayCandles[formingIdx];
                       const exactEntryX = getCandleX(formingIdx, chartWidth);
@@ -1581,10 +1581,27 @@ export const CandleChartWithBubbles: React.FC<CandleChartProps> = ({
                       const slPrice = scalp?.stopLoss.price ?? edge.hardStopLoss;
                       const slY = priceToY(slPrice);
                       const themeColor = isBuySetup ? '#10b981' : '#ef4444';
-                      const themeBg = isBuySetup ? '#032316' : '#26070a';
+                      const themeBg = isBuySetup ? '#041d14' : '#24080a';
+                      const pipMult = instCfg.pipMultiplier || (snapshot.instrument === 'BTCUSD' ? 1 : 10);
+                      const riskPips = Math.abs(Number(((exactWickPrice - slPrice) * pipMult).toFixed(1)));
 
-                      // Place the target sniper icon directly UNDER the forming lower wick (or directly above for upper wick)
-                      const targetSniperY = isBuySetup ? exactWickY + 24 : exactWickY - 24;
+                      // Position the Sniper Reticle directly at the forming wick tip with zero awkward offset
+                      const reticleX = exactEntryX;
+                      const reticleY = exactWickY;
+
+                      // Place details badge cleanly to the right of the candle in the open margin, perfectly safe from top HUD
+                      const badgeWidth = isMobile ? 168 : 194;
+                      const badgeHeight = 40;
+                      const hasRoomRight = chartWidth - paddingRight - (exactEntryX + 16) >= badgeWidth - 10;
+                      
+                      const badgeX = hasRoomRight
+                        ? exactEntryX + 16
+                        : Math.max(paddingLeft + 6, exactEntryX - badgeWidth - 16);
+
+                      // Safe Y clamping: never overlaps the Top Prediction HUD (which ends at paddingTop + 50) and never clips off bottom
+                      const topSafeBound = paddingTop + 52;
+                      const bottomSafeBound = chartHeight - paddingBottom - badgeHeight - 4;
+                      const badgeY = Math.max(topSafeBound, Math.min(bottomSafeBound, exactWickY - badgeHeight / 2));
 
                       return (
                         <g key="wick-formation-indication" className="pointer-events-none">
@@ -1595,9 +1612,9 @@ export const CandleChartWithBubbles: React.FC<CandleChartProps> = ({
                             x2={chartWidth - paddingRight}
                             y2={exactWickY}
                             stroke={themeColor}
-                            strokeWidth="1.6"
+                            strokeWidth="1.5"
                             strokeDasharray="4 3"
-                            opacity={0.9}
+                            opacity={0.85}
                           />
 
                           {/* 2. Invalidation Stop-Loss Ray starting directly from forming candle entry */}
@@ -1609,7 +1626,7 @@ export const CandleChartWithBubbles: React.FC<CandleChartProps> = ({
                             stroke="#ef4444"
                             strokeWidth="1.2"
                             strokeDasharray="3 3"
-                            opacity={0.75}
+                            opacity={0.7}
                           />
 
                           {/* 3. Right price margin badge for Wick Entry */}
@@ -1658,127 +1675,109 @@ export const CandleChartWithBubbles: React.FC<CandleChartProps> = ({
                             🛑 SL {slPrice.toFixed(digits)}
                           </text>
 
-                          {/* 5. Directional Arrow Pointing Directly Into the Forming Wick Tip */}
-                          <polygon
-                            points={
-                              isBuySetup
-                                ? `${exactEntryX},${exactWickY + 2} ${exactEntryX - 5},${targetSniperY - 14} ${exactEntryX + 5},${targetSniperY - 14}`
-                                : `${exactEntryX},${exactWickY - 2} ${exactEntryX - 5},${targetSniperY + 14} ${exactEntryX + 5},${targetSniperY + 14}`
-                            }
-                            fill={themeColor}
-                            opacity={0.95}
+                          {/* 5. Precision Leader Line from Wick Reticle directly to the Entry Details Badge */}
+                          <line
+                            x1={hasRoomRight ? reticleX + 10 : reticleX - 10}
+                            y1={reticleY}
+                            x2={hasRoomRight ? badgeX : badgeX + badgeWidth}
+                            y2={badgeY + badgeHeight / 2}
+                            stroke={themeColor}
+                            strokeWidth="1.2"
+                            strokeDasharray="2 2"
+                            opacity={0.8}
                           />
 
-                          {/* 6. Target Sniper Icon Located Directly UNDER the Forming Wick */}
-                          <g transform={`translate(${exactEntryX}, ${targetSniperY})`}>
+                          {/* 6. Target Sniper Reticle Icon Located DIRECTLY on the Wick Tip */}
+                          <g transform={`translate(${reticleX}, ${reticleY})`}>
                             {/* Sniper scope outer ring */}
                             <circle
-                              r={13}
+                              r={9}
                               fill={themeBg}
                               fillOpacity={0.92}
                               stroke={themeColor}
-                              strokeWidth="1.8"
+                              strokeWidth="1.6"
                             />
-                            {/* Animated pulsing outer aura */}
+                            {/* Animated pulsing outer radar ping */}
                             <circle
-                              r={18}
+                              r={14}
                               fill="none"
                               stroke={themeColor}
                               strokeWidth="1.2"
                               strokeDasharray="3 2"
+                              className="animate-ping"
                               opacity={0.65}
                             />
                             {/* Inner reticle ring */}
                             <circle
-                              r={6.5}
+                              r={4.5}
                               fill="none"
                               stroke={themeColor}
-                              strokeWidth="1.2"
+                              strokeWidth="1.1"
                             />
                             {/* Center precision bullseye */}
                             <circle
-                              r={2.8}
+                              r={2.2}
                               fill={themeColor}
                             />
                             {/* 4 Sniper Crosshair lines (North, South, East, West) */}
-                            <line x1={-18} y1={0} x2={-9} y2={0} stroke={themeColor} strokeWidth="1.6" strokeLinecap="round" />
-                            <line x1={9} y1={0} x2={18} y2={0} stroke={themeColor} strokeWidth="1.6" strokeLinecap="round" />
-                            <line x1={0} y1={-18} x2={0} y2={-9} stroke={themeColor} strokeWidth="1.6" strokeLinecap="round" />
-                            <line x1={0} y1={9} x2={0} y2={18} stroke={themeColor} strokeWidth="1.6" strokeLinecap="round" />
-                            {/* Sniper crosshair sub-ticks */}
-                            <line x1={-5} y1={-1} x2={-5} y2={1} stroke={themeColor} strokeWidth="1" />
-                            <line x1={5} y1={-1} x2={5} y2={1} stroke={themeColor} strokeWidth="1" />
-                            <line x1={-1} y1={-5} x2={1} y2={-5} stroke={themeColor} strokeWidth="1" />
-                            <line x1={-1} y1={5} x2={1} y2={5} stroke={themeColor} strokeWidth="1" />
+                            <line x1={-13} y1={0} x2={-6} y2={0} stroke={themeColor} strokeWidth="1.4" strokeLinecap="round" />
+                            <line x1={6} y1={0} x2={13} y2={0} stroke={themeColor} strokeWidth="1.4" strokeLinecap="round" />
+                            <line x1={0} y1={-13} x2={0} y2={-6} stroke={themeColor} strokeWidth="1.4" strokeLinecap="round" />
+                            <line x1={0} y1={6} x2={0} y2={13} stroke={themeColor} strokeWidth="1.4" strokeLinecap="round" />
                           </g>
 
-                          {/* 7. Exact Forming Wick Entry Label Badge Positioned Directly Under Target Sniper Icon */}
-                          {(() => {
-                            const badgeWidth = isMobile ? 152 : 196;
-                            const badgeHeight = 44;
-                            // For BUY: place below target sniper icon. For SELL: place above target sniper icon.
-                            const badgeY = isBuySetup
-                              ? Math.min(chartHeight - paddingBottom - badgeHeight - 2, targetSniperY + 22)
-                              : Math.max(paddingTop + 4, targetSniperY - 22 - badgeHeight);
-                            const badgeX = Math.max(
-                              paddingLeft + 4,
-                              Math.min(chartWidth - paddingRight - badgeWidth - 4, exactEntryX - badgeWidth / 2)
-                            );
-
-                            return (
-                              <g transform={`translate(${badgeX}, ${badgeY})`}>
-                                <rect
-                                  x={0}
-                                  y={0}
-                                  width={badgeWidth}
-                                  height={badgeHeight}
-                                  fill={themeBg}
-                                  fillOpacity={0.96}
-                                  stroke={themeColor}
-                                  strokeWidth="1.2"
-                                  rx={4}
-                                />
-                                <rect
-                                  x={0}
-                                  y={0}
-                                  width={3.5}
-                                  height={badgeHeight}
-                                  fill={themeColor}
-                                  rx={1.5}
-                                />
-                                <text
-                                  x={8}
-                                  y={13}
-                                  fill={themeColor}
-                                  fontSize={isMobile ? '7.5' : '8.5'}
-                                  fontFamily="JetBrains Mono"
-                                  fontWeight="bold"
-                                >
-                                  🎯 {isBuySetup ? 'BUY WICK ENTRY' : 'SELL WICK ENTRY'} ({exactWickPrice.toFixed(digits)})
-                                </text>
-                                <text
-                                  x={8}
-                                  y={24}
-                                  fill="#fde047"
-                                  fontSize={isMobile ? '6.8' : '7.4'}
-                                  fontFamily="JetBrains Mono"
-                                  fontWeight="bold"
-                                >
-                                  ⚡ Vol Absorbed · 0 Price Progress
-                                </text>
-                                <text
-                                  x={8}
-                                  y={35}
-                                  fill="#6ee7b7"
-                                  fontSize={isMobile ? '6.8' : '7.4'}
-                                  fontFamily="JetBrains Mono"
-                                  fontWeight="bold"
-                                >
-                                  ✓ +1.5t Bounce Confirmed · Risk: 1.5p [LIVE]
-                                </text>
-                              </g>
-                            );
-                          })()}
+                          {/* 7. Exact Forming Wick Entry Details Badge (Always 100% visible, never clipped) */}
+                          <g transform={`translate(${badgeX}, ${badgeY})`}>
+                            <rect
+                              x={0}
+                              y={0}
+                              width={badgeWidth}
+                              height={badgeHeight}
+                              fill={themeBg}
+                              fillOpacity={0.96}
+                              stroke={themeColor}
+                              strokeWidth="1.3"
+                              rx={4}
+                            />
+                            <rect
+                              x={0}
+                              y={0}
+                              width={3.5}
+                              height={badgeHeight}
+                              fill={themeColor}
+                              rx={1.5}
+                            />
+                            <text
+                              x={8}
+                              y={12.5}
+                              fill={themeColor}
+                              fontSize={isMobile ? '7.5' : '8.5'}
+                              fontFamily="JetBrains Mono"
+                              fontWeight="bold"
+                            >
+                              🎯 {isBuySetup ? 'BUY WICK ENTRY' : 'SELL WICK ENTRY'} ({exactWickPrice.toFixed(digits)})
+                            </text>
+                            <text
+                              x={8}
+                              y={23.5}
+                              fill="#fde047"
+                              fontSize={isMobile ? '7' : '7.6'}
+                              fontFamily="JetBrains Mono"
+                              fontWeight="bold"
+                            >
+                              🛑 SL: {slPrice.toFixed(digits)} · Risk: {riskPips}p
+                            </text>
+                            <text
+                              x={8}
+                              y={34}
+                              fill="#6ee7b7"
+                              fontSize={isMobile ? '6.8' : '7.3'}
+                              fontFamily="JetBrains Mono"
+                              fontWeight="bold"
+                            >
+                              ✓ Absorption Confirmed · Zero Float Target
+                            </text>
+                          </g>
                         </g>
                       );
                     })()}

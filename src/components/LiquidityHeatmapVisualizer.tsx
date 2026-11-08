@@ -124,14 +124,16 @@ export const LiquidityHeatmapVisualizer: React.FC<LiquidityHeatmapVisualizerProp
   } | null>(null);
 
   const [dismissedMoveIds, setDismissedMoveIds] = useState<Record<string, boolean>>({});
+  const [dismissedSpoofTrace, setDismissedSpoofTrace] = useState<boolean>(false);
 
   // Generate Matrix for temporal view
   const rowCount = settings.resolution === 'detailed' ? 84 : settings.resolution === 'balanced' ? 64 : 45;
+  const spoofProbability = modelOutput.marketIntelligence?.liquidity?.spoofDetector?.spoofProbability ?? 0;
   const heatmapData = useMemo(() => {
-    return generateHeatmapMatrix(candles, instrument, rowCount);
-  }, [candles, instrument, rowCount]);
+    return generateHeatmapMatrix(candles, instrument, rowCount, spoofProbability);
+  }, [candles, instrument, rowCount, spoofProbability]);
 
-  const { columns, priceLevels, pools, sweepZones, minPrice, maxPrice, priceStep } = heatmapData;
+  const { columns, priceLevels, pools, sweepZones, pulledSpoofEvents, minPrice, maxPrice, priceStep } = heatmapData;
   const digits = instrument.digits;
 
   // Expected Move Levels (Strict Necessity: Only printed where an active setup, test, or trigger actually exists)
@@ -179,13 +181,13 @@ export const LiquidityHeatmapVisualizer: React.FC<LiquidityHeatmapVisualizerProp
             price: vaar.defendedLevel,
             symbol: '⚠️',
             moveType: 'REVERSAL',
-            badgeTitle: isSpoofHigh ? '⚠️ PULLING (BYPASS RISK)' : '⚡ WALL CONSUMED (NO REVERSAL)',
+            badgeTitle: isSpoofHigh ? '⚠️ PULLING (BYPASS RISK)' : '⚡ WALL CONSUMED (DO NOT FADE YET)',
             badgeDetail: isSpoofHigh
               ? `Phantom Limit Depth @ ${vaar.defendedLevel.toFixed(digits)} (Pull Rate: ${Math.round((mi?.liquidity?.spoofDetector?.spoofProbability ?? 0.6) * 100)}%)`
-              : `Aggressive Initiative @ ${vaar.defendedLevel.toFixed(digits)} Overwhelming Limits`,
+              : `Aggressive Initiative @ ${vaar.defendedLevel.toFixed(digits)} Overwhelming Limits · Await Reclaim`,
             explanation: isSpoofHigh
               ? 'Warning: High order pulling rate detected. Resting limit orders are being cancelled as price approaches without absorbing volume. Expecting price to bypass this level.'
-              : 'Warning: Aggressive market orders are consuming the resting wall. Do NOT fade into active momentum. If this is a stop-hunt, wait for price to reject the extreme and reclaim value — the system will fire a Confirmed Reversal signal the moment the reclaim is proven.',
+              : 'Warning: Aggressive market orders are actively consuming the resting wall. Do NOT fade into this active momentum spike. If this is a stop-hunt, wait for price to exhaust at the extreme and reclaim back inside the level — the system will fire a Confirmed Reversal signal the moment the reclaim is proven.',
             color: isSpoofHigh ? '#facc15' : '#fb923c',
             bgColor: isSpoofHigh ? '#2a2205' : '#2b1206',
             borderColor: isSpoofHigh ? '#eab308' : '#ea580c',
@@ -1215,6 +1217,89 @@ export const LiquidityHeatmapVisualizer: React.FC<LiquidityHeatmapVisualizerProp
                       >
                         ⚡ LIQUIDITY SWEEP & DEFENSE
                       </text>
+                    </g>
+                  );
+                })}
+
+              {/* Pulled / Vanished Spoof Liquidity Traces (Strictly ONLY active when elevated spoofing >= 50% is flagged) */}
+              {!dismissedSpoofTrace &&
+                spoofProbability >= 0.50 &&
+                pulledSpoofEvents &&
+                pulledSpoofEvents.map((spoof, sIdx) => {
+                  const width = containerRef.current?.clientWidth || 900;
+                  const xEnd = getCandleX(spoof.endCandleIndex, width);
+                  const y = priceToY(spoof.price, 560);
+                  if (y < paddingTop || y > 560 - paddingBottom) return null;
+                  const rightEdge = Math.min(width - paddingRight, xEnd + 160);
+
+                  return (
+                    <g key={`spoof-trace-${sIdx}`} className="cursor-help">
+                      {/* Ghost Dashed Trajectory: shows where the bright wall abruptly terminated without absorption */}
+                      <line
+                        x1={xEnd}
+                        y1={y}
+                        x2={rightEdge}
+                        y2={y}
+                        stroke="#f59e0b"
+                        strokeWidth="1.2"
+                        strokeDasharray="3 3"
+                        opacity={0.65}
+                      />
+                      {/* Abrupt Disappearance Termination Marker */}
+                      <circle cx={xEnd} cy={y} r={4.5} fill="#ef4444" stroke="#fde047" strokeWidth="1.2" />
+                      <circle cx={xEnd} cy={y} r={2} fill="#ffffff" />
+                      {/* Spoof Disappearance Badge Tag */}
+                      <g transform={`translate(${xEnd + 8}, ${y - 10})`}>
+                        <rect
+                          x={0}
+                          y={0}
+                          width={240}
+                          height={19}
+                          fill="#180c05"
+                          fillOpacity={0.94}
+                          stroke="#f59e0b"
+                          strokeWidth={1}
+                          rx={3}
+                        />
+                        <text
+                          x={6}
+                          y={13}
+                          fill="#fcd34d"
+                          fontSize="8"
+                          fontFamily="JetBrains Mono"
+                          fontWeight="bold"
+                        >
+                          👻 PULLED SPOOF @ {spoof.price.toFixed(digits)} (0 Lots Filled)
+                        </text>
+                        {/* Instant Dismiss Button (✕) */}
+                        <g
+                          className="cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDismissedSpoofTrace(true);
+                          }}
+                        >
+                          <circle
+                            cx={228}
+                            cy={9.5}
+                            r={5.5}
+                            fill="#2a1408"
+                            stroke="#f59e0b"
+                            strokeWidth={0.8}
+                          />
+                          <text
+                            x={228}
+                            y={12}
+                            fill="#fcd34d"
+                            fontSize="8"
+                            fontFamily="JetBrains Mono"
+                            fontWeight="bold"
+                            textAnchor="middle"
+                          >
+                            ×
+                          </text>
+                        </g>
+                      </g>
                     </g>
                   );
                 })}
