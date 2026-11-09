@@ -32,23 +32,27 @@ export class SelfHealingErrorBoundary extends Component<Props, State> {
     };
   }
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return {
       hasError: true,
       errorMessage: error?.message || 'Transient state anomaly detected in active model pipeline',
-      autoHealingAttempt: 1,
-      isHealing: true,
     };
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.warn(`[SelfHealingEngine] Auto-detected anomaly in ${this.props.moduleName || 'Model'}:`, error, errorInfo);
 
-    // Attempt autonomous self-heal in 450ms
-    if (this.state.autoHealingAttempt <= 3) {
+    // Limit automatic reload attempts to 2 to prevent infinite flashing crash loops
+    if (this.state.autoHealingAttempt < 2) {
+      this.setState((prev) => ({
+        isHealing: true,
+        autoHealingAttempt: prev.autoHealingAttempt + 1,
+      }));
       this.healTimeoutId = setTimeout(() => {
         this.attemptAutoHeal();
-      }, 450);
+      }, 1000);
+    } else {
+      this.setState({ isHealing: false });
     }
   }
 
@@ -59,12 +63,20 @@ export class SelfHealingErrorBoundary extends Component<Props, State> {
   }
 
   attemptAutoHeal = () => {
-    this.setState((prev) => ({
+    this.setState({
       hasError: false,
       errorMessage: '',
       isHealing: false,
-      autoHealingAttempt: prev.autoHealingAttempt + 1,
-    }));
+    });
+  };
+
+  handleManualReset = () => {
+    this.setState({
+      hasError: false,
+      errorMessage: '',
+      isHealing: false,
+      autoHealingAttempt: 0,
+    });
   };
 
   render() {
@@ -89,10 +101,10 @@ export class SelfHealingErrorBoundary extends Component<Props, State> {
           </p>
 
           <button
-            onClick={this.attemptAutoHeal}
-            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-colors"
+            onClick={this.handleManualReset}
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-colors cursor-pointer"
           >
-            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            <RefreshCw className="w-3.5 h-3.5" />
             <span>Recalibrate & Restore</span>
           </button>
         </div>

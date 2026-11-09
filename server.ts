@@ -1,6 +1,7 @@
 import express from 'express';
 import type { Request, Response } from 'express';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import TradingView from '@mathieuc/tradingview';
@@ -1698,11 +1699,19 @@ Retail positioning remains heavily skewed with ${buyPct}% long against ${sellPct
     });
   });
 
-  // Vite middleware in dev or static files in production
-  if (process.env.NODE_ENV === 'production') {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
-    app.get('*', (req: Request, res: Response) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+  // Vite middleware in dev or static files in production when dist exists
+  const distDir = path.resolve(__dirname, 'dist');
+  const distHtml = path.resolve(distDir, 'index.html');
+
+  if (process.env.NODE_ENV === 'production' && fs.existsSync(distHtml)) {
+    console.log(`[Server] Serving production static bundle from ${distDir}`);
+    app.use(express.static(distDir));
+    app.get('*', (req: Request, res: Response, next) => {
+      if (fs.existsSync(distHtml)) {
+        res.sendFile(distHtml);
+      } else {
+        next();
+      }
     });
   } else {
     const vite = await createViteServer({

@@ -436,17 +436,25 @@ export const LiquidityHeatmapVisualizer: React.FC<LiquidityHeatmapVisualizerProp
   const paddingTop = 25;
   const paddingBottom = 32; // Bottom time scale
 
-  // Helper to map price to Y coordinate
+  // Helper to map price to Y coordinate (strictly finite, never returns NaN)
   const priceToY = useCallback((price: number, height: number) => {
-    const innerHeight = height - paddingTop - paddingBottom;
-    const ratio = (maxPrice - price) / (maxPrice - minPrice);
-    return paddingTop + ratio * innerHeight;
+    if (typeof price !== 'number' || isNaN(price) || !isFinite(price)) {
+      return paddingTop + 100;
+    }
+    const innerHeight = Math.max(100, height - paddingTop - paddingBottom);
+    const span = maxPrice - minPrice;
+    if (span <= 0 || !isFinite(span)) {
+      return paddingTop + innerHeight / 2;
+    }
+    const ratio = (maxPrice - price) / span;
+    const rawY = paddingTop + ratio * innerHeight;
+    return isNaN(rawY) || !isFinite(rawY) ? paddingTop + innerHeight / 2 : rawY;
   }, [maxPrice, minPrice, paddingTop, paddingBottom]);
 
   // Helper to map candle index to X coordinate
   const candleCount = columns.length;
   const getCandleX = useCallback((index: number, width: number) => {
-    const usableWidth = width - paddingLeft - paddingRight;
+    const usableWidth = Math.max(120, width - paddingLeft - paddingRight);
     const step = usableWidth / Math.max(1, candleCount);
     return paddingLeft + index * step + step / 2;
   }, [candleCount, paddingLeft, paddingRight]);
@@ -459,10 +467,10 @@ export const LiquidityHeatmapVisualizer: React.FC<LiquidityHeatmapVisualizerProp
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const width = canvas.width;
-    const height = canvas.height;
-    const usableWidth = width - paddingLeft - paddingRight;
-    const usableHeight = height - paddingTop - paddingBottom;
+    const width = Math.max(280, canvas.width || 320);
+    const height = Math.max(240, canvas.height || 560);
+    const usableWidth = Math.max(120, width - paddingLeft - paddingRight);
+    const usableHeight = Math.max(100, height - paddingTop - paddingBottom);
 
     // Clear background
     ctx.fillStyle = '#0f051d';
@@ -518,8 +526,10 @@ export const LiquidityHeatmapVisualizer: React.FC<LiquidityHeatmapVisualizerProp
     const handleResize = () => {
       if (!containerRef.current || !canvasRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
-      canvasRef.current.width = rect.width;
-      canvasRef.current.height = rect.height;
+      const safeW = Math.max(280, rect.width || containerRef.current.clientWidth || 320);
+      const safeH = Math.max(240, rect.height || containerRef.current.clientHeight || 560);
+      canvasRef.current.width = safeW;
+      canvasRef.current.height = safeH;
     };
 
     handleResize();
@@ -918,7 +928,7 @@ export const LiquidityHeatmapVisualizer: React.FC<LiquidityHeatmapVisualizerProp
                     fontFamily="JetBrains Mono"
                     fontWeight="bold"
                   >
-                    POC {modelOutput.valueStructure.poc.toFixed(digits)}
+                    POC {modelOutput?.valueStructure?.poc != null ? modelOutput.valueStructure.poc.toFixed(digits) : '0.00'}
                   </text>
                 </g>
               )}
@@ -1021,7 +1031,9 @@ export const LiquidityHeatmapVisualizer: React.FC<LiquidityHeatmapVisualizerProp
                               fontFamily="JetBrains Mono"
                               fontWeight="bold"
                             >
-                              {lvl.isReached ? `✓ REACHED: ${lvl.targetDestinationPrice!.toFixed(digits)}` : `LIVE TARGET: ${lvl.targetDestinationPrice!.toFixed(digits)}`}
+                              {lvl.isReached
+                                ? `✓ REACHED: ${lvl.targetDestinationPrice != null ? lvl.targetDestinationPrice.toFixed(digits) : '0.00'}`
+                                : `LIVE TARGET: ${lvl.targetDestinationPrice != null ? lvl.targetDestinationPrice.toFixed(digits) : '0.00'}`}
                             </text>
                             <text
                               x={lvl.isReached ? 166 : 188}

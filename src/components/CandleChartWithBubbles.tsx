@@ -1,7 +1,7 @@
 import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { Candle, FootprintBubble, OrderBookSnapshot } from '../types/orderbook';
 import { SniperModelOutput, SymbolTargetLifecycle } from '../types/sniperModel';
-import { INSTRUMENTS, generateHeatmapMatrix } from '../services/mockDataGenerator';
+import { INSTRUMENTS, generateHeatmapMatrix, generateCandles } from '../services/mockDataGenerator';
 import { Target, Crosshair, Zap, AlertTriangle, ArrowRight, CheckCircle2, Clock, Sparkles, Check, RotateCcw, Mic, Layers } from 'lucide-react';
 
 export interface MajorLiquidityCluster {
@@ -94,12 +94,18 @@ export const CandleChartWithBubbles: React.FC<CandleChartProps> = ({
   }, []);
 
   const isMobile = dimensions.width < 520;
+  // Fallback to valid baseline candles if candles array is empty or still loading on client
+  const safeCandles = useMemo(() => {
+    if (Array.isArray(candles) && candles.length > 0) return candles;
+    return generateCandles(snapshot?.instrument || 'XAUUSD', 36);
+  }, [candles, snapshot?.instrument]);
+
   // On mobile phones, display the most recent 24–28 candles so each candle has breathing room and isn't horizontally squeezed
-  const visibleCandleCount = isMobile ? Math.min(candles.length, 26) : candles.length;
-  const candleStartOffset = Math.max(0, candles.length - visibleCandleCount);
+  const visibleCandleCount = isMobile ? Math.min(safeCandles.length, 26) : safeCandles.length;
+  const candleStartOffset = Math.max(0, safeCandles.length - visibleCandleCount);
   const displayCandles = useMemo(() => {
-    const sliced = candles.slice(candleStartOffset).map((c) => ({ ...c }));
-    if (sliced.length > 0 && snapshot.currentPrice) {
+    const sliced = safeCandles.slice(candleStartOffset).map((c) => ({ ...c }));
+    if (sliced.length > 0 && typeof snapshot?.currentPrice === 'number' && !isNaN(snapshot.currentPrice) && snapshot.currentPrice > 0) {
       // Ensure the latest forming candle actively reflects genuine live price and true wick formation
       const last = sliced[sliced.length - 1];
       last.close = snapshot.currentPrice;
@@ -107,14 +113,14 @@ export const CandleChartWithBubbles: React.FC<CandleChartProps> = ({
       if (snapshot.currentPrice < last.low) last.low = snapshot.currentPrice;
     }
     return sliced;
-  }, [candles, candleStartOffset, snapshot.currentPrice]);
+  }, [safeCandles, candleStartOffset, snapshot?.currentPrice]);
 
-  const instCfg = INSTRUMENTS[snapshot.instrument] || INSTRUMENTS.XAUUSD;
-  const digits = instCfg.digits;
+  const instCfg = INSTRUMENTS[snapshot?.instrument || 'XAUUSD'] || INSTRUMENTS.XAUUSD;
+  const digits = instCfg?.digits ?? 2;
 
   // Unique signal ID based on active setup parameters
-  const currentSignalId = modelOutput.sniperEdge.isEdgeQualified
-    ? `${snapshot.instrument}_${modelOutput.sniperEdge.triggerAction}_${modelOutput.sniperEdge.optimalEntry.toFixed(digits)}_${modelOutput.orderFlowScalp?.hvnPrice.toFixed(digits) || '0'}`
+  const currentSignalId = modelOutput?.sniperEdge?.isEdgeQualified
+    ? `${snapshot?.instrument || 'XAUUSD'}_${modelOutput.sniperEdge.triggerAction}_${modelOutput.sniperEdge.optimalEntry?.toFixed(digits) || '0'}_${modelOutput.orderFlowScalp?.hvnPrice?.toFixed(digits) || '0'}`
     : '';
   const isWickSignalRemoved = Boolean(currentSignalId && removedWickSignalIds[currentSignalId]);
 
@@ -302,31 +308,37 @@ export const CandleChartWithBubbles: React.FC<CandleChartProps> = ({
     let min = Infinity;
     let max = -Infinity;
     displayCandles.forEach((c) => {
-      if (c.low < min) min = c.low;
-      if (c.high > max) max = c.high;
+      if (c && typeof c.low === 'number' && c.low < min) min = c.low;
+      if (c && typeof c.high === 'number' && c.high > max) max = c.high;
     });
 
-    const candleSpan = Math.max(max - min, instCfg.tickSize * 10);
+    if (!isFinite(min) || !isFinite(max) || min >= max) {
+      const base = instCfg?.basePrice || 100;
+      min = base * 0.995;
+      max = base * 1.005;
+    }
+
+    const candleSpan = Math.max(max - min, (instCfg?.tickSize || 0.1) * 10);
     // Allow Sniper levels to expand the viewport by at most 35% of the natural candle range so candles always stay tall & clear
     const maxAllowedExpansion = candleSpan * (isMobile ? 0.25 : 0.45);
     const clampLow = min - maxAllowedExpansion;
     const clampHigh = max + maxAllowedExpansion;
 
-    const edge = modelOutput.sniperEdge;
-    if (edge.isEdgeQualified) {
-      if (edge.hardStopLoss > 0) {
+    const edge = modelOutput?.sniperEdge;
+    if (edge && edge.isEdgeQualified) {
+      if (typeof edge.hardStopLoss === 'number' && edge.hardStopLoss > 0) {
         min = Math.min(min, Math.max(clampLow, edge.hardStopLoss));
         max = Math.max(max, Math.min(clampHigh, edge.hardStopLoss));
       }
-      if (edge.optimalEntry > 0) {
+      if (typeof edge.optimalEntry === 'number' && edge.optimalEntry > 0) {
         min = Math.min(min, Math.max(clampLow, edge.optimalEntry));
         max = Math.max(max, Math.min(clampHigh, edge.optimalEntry));
       }
-      if (edge.targetTP1 > 0) {
+      if (typeof edge.targetTP1 === 'number' && edge.targetTP1 > 0) {
         min = Math.min(min, Math.max(clampLow, edge.targetTP1));
         max = Math.max(max, Math.min(clampHigh, edge.targetTP1));
       }
-      if (edge.targetTP2 > 0) {
+      if (typeof edge.targetTP2 === 'number' && edge.targetTP2 > 0) {
         min = Math.min(min, Math.max(clampLow, edge.targetTP2));
         max = Math.max(max, Math.min(clampHigh, edge.targetTP2));
       }
@@ -334,34 +346,42 @@ export const CandleChartWithBubbles: React.FC<CandleChartProps> = ({
 
     // Ensure nearby major liquidity clusters stay within comfortable view
     majorClusters.forEach((cl) => {
-      if (cl.price > 0 && Math.abs(cl.price - snapshot.currentPrice) <= instCfg.tickSize * 70) {
+      if (cl && typeof cl.price === 'number' && cl.price > 0 && Math.abs(cl.price - (snapshot?.currentPrice || min)) <= (instCfg?.tickSize || 0.1) * 70) {
         min = Math.min(min, Math.max(clampLow, cl.price));
         max = Math.max(max, Math.min(clampHigh, cl.price));
       }
     });
 
     // Add clean vertical breathing margin
-    const margin = (max - min) * 0.1 || instCfg.tickSize * 5;
+    const margin = (max - min) * 0.1 || (instCfg?.tickSize || 0.1) * 5;
+    const finalMin = min - margin;
+    const finalMax = max + margin;
     return {
-      minPrice: min - margin,
-      maxPrice: max + margin,
-      priceRange: max - min + 2 * margin,
+      minPrice: finalMin,
+      maxPrice: finalMax,
+      priceRange: Math.max(instCfg?.tickSize || 0.1, finalMax - finalMin),
     };
-  }, [displayCandles, modelOutput.sniperEdge, majorClusters, snapshot.currentPrice, instCfg.tickSize, isMobile]);
+  }, [displayCandles, modelOutput?.sniperEdge, majorClusters, snapshot?.currentPrice, instCfg?.tickSize, instCfg?.basePrice, isMobile]);
 
-  const chartWidth = dimensions.width;
-  const chartHeight = dimensions.height;
+  const chartWidth = Math.max(280, dimensions.width);
+  const chartHeight = Math.max(260, dimensions.height);
   const paddingLeft = isMobile ? 26 : 45; // Compact volume profile on mobile
   const paddingRight = isMobile ? 54 : 70; // Price scale
   const paddingTop = 22;
   const paddingBottom = 24;
 
-  const innerHeight = Math.max(180, chartHeight - paddingTop - paddingBottom);
+  const innerHeight = Math.max(120, chartHeight - paddingTop - paddingBottom);
 
-  // Helper to map price to Y coordinate (clamped to chart canvas bounds)
+  // Helper to map price to Y coordinate (clamped to chart canvas bounds, never returns NaN)
   const priceToY = (price: number) => {
+    if (typeof price !== 'number' || isNaN(price) || !isFinite(price) || priceRange <= 0) {
+      return paddingTop + innerHeight / 2;
+    }
     const ratio = (maxPrice - price) / priceRange;
     const rawY = paddingTop + ratio * innerHeight;
+    if (isNaN(rawY) || !isFinite(rawY)) {
+      return paddingTop + innerHeight / 2;
+    }
     return Math.max(paddingTop - 6, Math.min(chartHeight - paddingBottom + 6, rawY));
   };
 
@@ -1787,7 +1807,7 @@ export const CandleChartWithBubbles: React.FC<CandleChartProps> = ({
             })()}
 
             {/* When Premature Signal Guard is active (Unswept Liquidity Magnet still attracting price), show unobtrusive status badge */}
-            {!modelOutput.sniperEdge.isEdgeQualified && modelOutput.sniperEdge.liquiditySweepAudit && (
+            {!modelOutput?.sniperEdge?.isEdgeQualified && modelOutput?.sniperEdge?.liquiditySweepAudit && (
               <g transform={`translate(${paddingLeft + 6}, ${paddingTop + 4})`} className="pointer-events-none">
                 <rect
                   x={0}
@@ -1805,7 +1825,7 @@ export const CandleChartWithBubbles: React.FC<CandleChartProps> = ({
                   {isMobile ? '⏳ SCANNING FOR LIQUIDITY SWEEP' : '⏳ PREMATURE SIGNAL BLOCKED · SCANNING FOR LIQUIDITY SWEEP'}
                 </text>
                 <text x={10} y={24} fill="#cbd5e1" fontSize={isMobile ? '7' : '7.8'} fontFamily="JetBrains Mono">
-                  Magnet @ {(modelOutput.sniperEdge.liquiditySweepAudit.unclaimedAttractingPoolPrice ?? modelOutput.valueStructure.poc).toFixed(digits)} · Waiting for Stop-Hunt
+                  Magnet @ {((modelOutput.sniperEdge.liquiditySweepAudit.unclaimedAttractingPoolPrice ?? modelOutput.valueStructure?.poc ?? snapshot?.currentPrice ?? 0)).toFixed(digits)} · Waiting for Stop-Hunt
                 </text>
               </g>
             )}

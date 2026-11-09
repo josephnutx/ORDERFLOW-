@@ -2030,22 +2030,31 @@ export function generateHeatmapMatrix(
 ): HeatmapMatrixResult {
   const cfg = typeof cfgOrSymbol === 'string' ? (INSTRUMENTS[cfgOrSymbol] || INSTRUMENTS.XAUUSD) : cfgOrSymbol;
   const digits = cfg.digits;
+  const basePrice = cfg.basePrice || 100;
+
+  // Defensive fallback: if candles is empty or still loading on client, provide valid baseline candles
+  const safeCandles = Array.isArray(candles) && candles.length > 0 ? candles : generateCandles(cfg.symbol || 'XAUUSD', 40);
 
   // 1. Calculate overall price boundaries
   let globalMin = Infinity;
   let globalMax = -Infinity;
-  candles.forEach((c) => {
-    if (c.low < globalMin) globalMin = c.low;
-    if (c.high > globalMax) globalMax = c.high;
+  safeCandles.forEach((c) => {
+    if (c && typeof c.low === 'number' && c.low < globalMin) globalMin = c.low;
+    if (c && typeof c.high === 'number' && c.high > globalMax) globalMax = c.high;
   });
 
+  if (!isFinite(globalMin) || !isFinite(globalMax) || globalMin >= globalMax) {
+    globalMin = basePrice * 0.995;
+    globalMax = basePrice * 1.005;
+  }
+
   // Add 15% margin on top and bottom so resting limit walls above/below are clearly visible
-  const range = globalMax - globalMin || 10;
+  const range = globalMax - globalMin || basePrice * 0.01;
   const margin = range * 0.18;
   const minPrice = Number((globalMin - margin).toFixed(digits));
   const maxPrice = Number((globalMax + margin).toFixed(digits));
-  const totalSpan = maxPrice - minPrice;
-  const priceStep = totalSpan / (rowCount - 1);
+  const totalSpan = Math.max(cfg.tickSize * 10, maxPrice - minPrice);
+  const priceStep = totalSpan / Math.max(1, rowCount - 1);
 
   // Generate discrete price levels array (ascending)
   const priceLevels: number[] = [];
@@ -2054,22 +2063,18 @@ export function generateHeatmapMatrix(
   }
 
   // 2. Define persistent institutional liquidity walls (matching heatmap.PNG)
-  // Find key structural price anchors:
-  // - Swing highs across candles
-  // - Swing lows
-  // - Consolidation shelf (red box range)
-  const candleCount = candles.length;
+  const candleCount = safeCandles.length;
   
-  // Pick key swing resistance prices
-  const highCandle = candles.reduce((prev, curr) => curr.high > prev.high ? curr : prev, candles[0]);
-  const lowCandle = candles.reduce((prev, curr) => curr.low < prev.low ? curr : prev, candles[0]);
+  // Pick key swing resistance prices safely
+  const highCandle = safeCandles.reduce((prev, curr) => (curr && curr.high > (prev?.high ?? -Infinity)) ? curr : prev, safeCandles[0]) || safeCandles[0];
+  const lowCandle = safeCandles.reduce((prev, curr) => (curr && curr.low < (prev?.low ?? Infinity)) ? curr : prev, safeCandles[0]) || safeCandles[0];
   
   // The consolidation shelf (mimicking the red rectangle in heatmap.PNG around index 20-32)
-  const consolStartIdx = Math.max(10, Math.floor(candleCount * 0.45));
-  const consolEndIdx = Math.min(candleCount - 5, Math.floor(candleCount * 0.72));
-  const consolCandles = candles.slice(consolStartIdx, consolEndIdx + 1);
-  const consolMin = Math.min(...consolCandles.map((c) => c.low));
-  const consolMax = Math.max(...consolCandles.map((c) => c.high));
+  const consolStartIdx = Math.max(0, Math.min(10, Math.floor(candleCount * 0.45)));
+  const consolEndIdx = Math.max(consolStartIdx + 1, Math.min(candleCount - 1, Math.floor(candleCount * 0.72)));
+  const consolCandles = safeCandles.slice(consolStartIdx, consolEndIdx + 1);
+  const consolMin = consolCandles.length > 0 ? Math.min(...consolCandles.map((c) => c.low)) : (basePrice * 0.998);
+  const consolMax = consolCandles.length > 0 ? Math.max(...consolCandles.map((c) => c.high)) : (basePrice * 1.002);
 
   // Ghost Pulled Spoof Wall: Strictly ONLY generated when model flags active elevated spoofing (>= 50%)
   const isElevatedSpoof = spoofProbability >= 0.50;
